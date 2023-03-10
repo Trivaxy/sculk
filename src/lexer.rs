@@ -64,7 +64,7 @@ pub enum Token {
 
     // used internally to keep track of what line we're on
     // the parser will never receive this from the token stream
-    #[token(r"\n")]
+    #[token("\n")]
     Newline,
 
     #[error]
@@ -94,23 +94,28 @@ impl<'a> TokenStream<'a> {
     }
 
     pub fn next(&mut self) -> Option<&Token> {
+        self.discard_newlines();
+
         self.current = self.next.take();
         self.next = self.lexer.next();
 
-        while let Some(Token::Newline) = self.current {
-            self.line += 1;
-            self.col = 0;
-
-            self.current = self.next.take();
-            self.next = self.lexer.next();
-        }
+        self.discard_newlines();
 
         self.col = self.lexer.span().start;
         self.current.as_ref()
     }
 
     pub fn peek(&mut self) -> Option<&Token> {
+        self.discard_newlines();
         self.next.as_ref()
+    }
+
+    fn discard_newlines(&mut self) {
+        while let Some(Token::Newline) = self.next {
+            self.next = self.lexer.next();
+            self.line += 1;
+            self.col = 0;
+        }
     }
 
     pub fn current(&mut self) -> Option<&Token> {
