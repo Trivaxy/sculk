@@ -187,8 +187,9 @@ impl CodeGenerator {
             }
         }
 
-        // last intermediate tmp is the result of the full operation.
-        // if it isn't tmp0, then move it to tmp0 and free all tmps (this is just an optimization)
+        // the last intermediate tmp is the result of the full operation.
+        // if it's already in tmp0, we don't need to do anything (optimization)
+        // otherwise, we need to move it to tmp0
         let result_tmp = *intermediate_tmps.last().unwrap();
 
         if result_tmp != 0 {
