@@ -145,7 +145,7 @@ impl CodeGenerator {
         if self.eval_instrs.is_empty() {
             return;
         }
-        
+
         // keep track of tmps that were used for intermediate operations
         // we need to free them after the full operation is done
         let mut intermediate_tmps = Vec::new();
@@ -187,9 +187,13 @@ impl CodeGenerator {
             }
         }
 
-        // last intermediate tmp is the result of the full operation, move it to tmp0 and free all tmps
+        // last intermediate tmp is the result of the full operation.
+        // if it isn't tmp0, then move it to tmp0 and free all tmps (this is just an optimization)
         let result_tmp = *intermediate_tmps.last().unwrap();
-        self.emit_action(Action::SetVariableToVariable { first: Self::get_tmp(0), second: Self::get_tmp(result_tmp) });
+
+        if result_tmp != 0 {
+            self.emit_action(Action::SetVariableToVariable { first: Self::get_tmp(0), second: Self::get_tmp(result_tmp) });
+        }
 
         for tmp in intermediate_tmps {
             self.free_tmp(tmp);
