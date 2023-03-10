@@ -13,6 +13,9 @@ pub struct CodeGenerator {
 }
 
 impl CodeGenerator {
+    // TODO: right now, any statements that are outside functions do not get printed because
+    // they are put in an implicit "main" function that never gets pushed to ready_functions
+    // this is a temporary problem until I implement a proper main function
     pub fn compile_src(src: &str) -> Result<Self, Vec<CompileError>> {
         let mut parser = Parser::new(src);
         
@@ -49,9 +52,14 @@ impl CodeGenerator {
             ParserNode::VariableDeclaration { name, expr, ty: _ } => self.visit_variable_declaration(name, expr),
             ParserNode::Program(nodes) => self.visit_program(nodes),
             ParserNode::FunctionDeclaration { name, args, return_ty, body } => self.visit_function_declaration(name, args, return_ty, body),
+            ParserNode::FunctionCall { name, args } => self.visit_function_call(name, args),
             ParserNode::Return(expr) => self.visit_return(expr),
             ParserNode::Block(nodes) => self.visit_block(nodes),
             _ => todo!()
+        }
+
+        if self.bin_op_depth == 0 {
+            self.flush_eval_instrs();
         }
     }
 
@@ -72,9 +80,11 @@ impl CodeGenerator {
     }
 
     // TODO: implement shadowing
+    // TODO: function arguments everywhere should resolve to something shorter than _ARG[NAME][INDEX]
     fn visit_identifier(&mut self, name: &str) {
-        if let Some(index) = self.unfinished_functions.last().unwrap().args.get(name) {
-            self.eval_instrs.push(EvaluationInstruction::PushVariable(format!("_ARG{}", index)))
+        let current_func = self.unfinished_functions.last().unwrap();
+        if let Some(index) = current_func.args.get(name) {
+            self.eval_instrs.push(EvaluationInstruction::PushVariable(format!("_ARG{}{}", current_func.name, index)))
         } else {
             self.eval_instrs.push(EvaluationInstruction::PushVariable(format!("_VAR{}", name.to_string())));
         }
@@ -88,10 +98,6 @@ impl CodeGenerator {
         self.eval_instrs.push(EvaluationInstruction::Operation(op));
 
         self.bin_op_depth -= 1;
-
-        if self.bin_op_depth == 0 {
-            self.flush_eval_instrs();
-        }
     }
 
     fn visit_variable_declaration(&mut self, name: &str, val: &ParserNode) {
@@ -105,6 +111,15 @@ impl CodeGenerator {
         self.unfinished_functions.push(Function::new_empty(name.to_string(), args.iter().map(|node| node.as_identifier().to_string()).collect(), return_ty.as_ref().map(|node| node.as_identifier().to_string())));
         self.visit_node(body);
         self.ready_functions.push(self.unfinished_functions.pop().unwrap());
+    }
+
+    fn visit_function_call(&mut self, name: &str, args: &[ParserNode]) {
+        for (i, arg) in args.iter().enumerate() {
+            self.visit_node(arg);
+            self.emit_action(Action::SetVariableToVariable { first: format!("_ARG{}{}", name, i), second: Self::get_tmp(0) });
+        }
+
+        self.emit_action(Action::CallFunction { target: name.to_string() });
     }
 
     // TODO: we have a big problem. returns work fine if there is only one at the end of the method
@@ -127,6 +142,10 @@ impl CodeGenerator {
 
     // TODO: check if the stack is malformed, will help in catching bugs
     fn flush_eval_instrs(&mut self) {
+        if self.eval_instrs.is_empty() {
+            return;
+        }
+        
         // keep track of tmps that were used for intermediate operations
         // we need to free them after the full operation is done
         let mut intermediate_tmps = Vec::new();
@@ -175,6 +194,8 @@ impl CodeGenerator {
         for tmp in intermediate_tmps {
             self.free_tmp(tmp);
         }
+
+        self.eval_instrs.clear();
     }
 
     fn reserve_available_tmp(&mut self) -> i32 {
@@ -195,7 +216,7 @@ impl CodeGenerator {
         self.output.push_str("scoreboard objectives add _SCULK dummy\n");
 
         for function in &self.ready_functions {
-            self.output.push_str(&format!("# function {}\n", function.name));
+            self.output.push_str(&format!("\r\n# function {}\n", function.name));
 
             for action in &function.actions {
                 Self::write_action(&mut self.output, action);
@@ -217,7 +238,7 @@ impl CodeGenerator {
             Action::DivideVariables { first, second } => str.push_str(&format!("scoreboard players operation {} _SCULK /= {} _SCULK", first, second)),
             Action::ModuloVariables { first, second } => str.push_str(&format!("scoreboard players operation {} _SCULK %= {} _SCULK", first, second)),
             Action::SetVariableToVariable { first, second } => str.push_str(&format!("scoreboard players operation {} _SCULK = {} _SCULK", first, second)),
-            _ => todo!()
+            Action::CallFunction { target } => str.push_str(&format!("function {}", target))
         }
     }
 
@@ -240,6 +261,7 @@ enum Action {
     DivideVariables { first: String, second: String },
     ModuloVariables { first: String, second: String },
     SetVariableToVariable { first: String, second: String },
+    CallFunction { target: String }
 }
 
 #[derive(Debug, Clone)]

@@ -24,6 +24,7 @@ pub enum ParserNode {
     VariableDeclaration { name: String, expr: Box<ParserNode>, ty: Option<SculkType> },
     FunctionDeclaration { name: String, args: Vec<ParserNode>, return_ty: Option<Box<ParserNode>>, body: Box<ParserNode> },
     Return(Box<ParserNode>),
+    FunctionCall { name: String, args: Vec<ParserNode> },
     Operation(Box<ParserNode>, Box<ParserNode>, Operation),
 }
 
@@ -185,6 +186,27 @@ impl<'a> Parser<'a> {
         Ok(ParserNode::Return(Box::new(expr)))
     }
 
+    fn parse_func_call(&mut self, name: String) -> ParseResult {
+        expect_tok!(self, Token::LeftParens, "expected (");
+
+        let mut args = Vec::new();
+
+        if self.tokens.peek() != Some(&Token::RightParens) {
+            let arg = self.parse_expression()?;
+            args.push(arg);
+
+            while self.tokens.peek() == Some(&Token::Comma) {
+                self.tokens.next(); // consume the comma
+                let arg = self.parse_expression()?;
+                args.push(arg);
+            }
+        }
+
+        expect_tok!(self, Token::RightParens, "expected )");
+
+        Ok(ParserNode::FunctionCall { name, args })
+    }
+
     fn parse_expression_statement(&mut self) -> ParseResult {
         let expr = self.parse_expression()?;
         expect_tok!(self, Token::Semicolon, "expected ;");
@@ -232,7 +254,14 @@ impl<'a> Parser<'a> {
     fn parse_primary(&mut self) -> ParseResult {
         match self.tokens.peek() {
             Some(Token::Number(_)) => self.parse_number(),
-            Some(Token::Identifier(_)) => self.parse_identifier(),
+            Some(Token::Identifier(_)) => {
+                let identifier = self.parse_identifier()?;
+
+                match self.tokens.peek() {
+                    Some(Token::LeftParens) => self.parse_func_call(identifier.as_identifier().to_string()),
+                    _ => Ok(identifier),
+                }
+            }
             Some(Token::Selector(_)) => self.parse_selector(),
             Some(Token::LeftParens) => {
                 self.tokens.next();
