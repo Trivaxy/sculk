@@ -83,12 +83,12 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) -> Result<ParserNode, &[ParseError]> {
-        let mut statements = Vec::new();
+        let mut functions = Vec::new();
 
         while self.tokens.peek().is_some() {
-            match self.parse_statement() {
-                Ok(stmt) => statements.push(stmt),
-                Err(_) => {} // error already logged and handled
+            match self.parse_func_declaration() {
+                Ok(stmt) => functions.push(stmt),
+                Err(_) => break // error already logged and handled, we just need to break
             };
         }
 
@@ -96,7 +96,7 @@ impl<'a> Parser<'a> {
             return Err(&self.errors);
         }
 
-        Ok(ParserNode::Program(statements))
+        Ok(ParserNode::Program(functions))
     }
 
     fn parse_block(&mut self) -> ParseResult {
