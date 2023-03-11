@@ -13,9 +13,6 @@ pub struct CodeGenerator {
 }
 
 impl CodeGenerator {
-    // TODO: right now, any statements that are outside functions do not get printed because
-    // they are put in an implicit "main" function that never gets pushed to ready_functions
-    // this is a temporary problem until I implement a proper main function
     pub fn compile_src(src: &str) -> Result<Self, Vec<CompileError>> {
         let mut parser = Parser::new(src);
         
