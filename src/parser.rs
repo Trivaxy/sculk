@@ -11,6 +11,14 @@ pub enum Operation {
     Multiply,
     Divide,
     Modulo,
+    GreaterThan,
+    LessThan,
+    GreaterThanOrEquals,
+    LessThanOrEquals,
+    CheckEquals,
+    NotEquals,
+    Not,
+    Negate
 }
 
 #[derive(Clone, Debug)]
@@ -27,6 +35,7 @@ pub enum ParserNode {
     Return(Box<ParserNode>),
     FunctionCall { name: String, args: Vec<ParserNode> },
     Operation(Box<ParserNode>, Box<ParserNode>, Operation),
+    Unary(Box<ParserNode>, Operation)
 }
 
 impl ParserNode {
@@ -215,7 +224,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self) -> ParseResult {
-        self.parse_term()
+        self.parse_equality()
     }
 
     fn parse_number(&mut self) -> ParseResult {
@@ -287,6 +296,63 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_unary(&mut self) -> ParseResult {
+        let op = match self.tokens.peek() {
+            Some(Token::Subtract) => Operation::Negate,
+            Some(Token::Not) => Operation::Not,
+            _ => return self.parse_primary(),
+        };
+
+        self.tokens.next();
+
+        let expr = self.parse_unary()?;
+
+        Ok(ParserNode::Unary(Box::new(expr), op))
+    }
+
+    // does not necessarily parse an equality, but rather an equality or a comparison (and in turn a comparison or a term)
+    fn parse_equality(&mut self) -> ParseResult {
+        let mut expr = self.parse_comparison()?;
+
+        while self.tokens.peek().is_some() {
+            let op = match self.tokens.peek().unwrap() {
+                Token::EqualsEquals => Operation::CheckEquals,
+                Token::NotEquals => Operation::NotEquals,
+                _ => break,
+            };
+
+            self.tokens.next();
+
+            let comparison = self.parse_comparison()?;
+            expr = ParserNode::Operation(Box::new(expr), Box::new(comparison), op);
+        }
+
+        Ok(expr)
+    }
+
+    // does not necessarily parse a comparison, but rather a comparison or a term
+    // TODO: stop multiple inequalities in the same expression
+    fn parse_comparison(&mut self) -> ParseResult {
+        let mut expr = self.parse_term()?;
+
+        while self.tokens.peek().is_some() {
+            let op = match self.tokens.peek().unwrap() {
+                Token::LessThan => Operation::LessThan,
+                Token::LessThanOrEquals => Operation::LessThanOrEquals,
+                Token::GreaterThan => Operation::GreaterThan,
+                Token::GreaterThanOrEquals => Operation::GreaterThanOrEquals,
+                _ => break,
+            };
+
+            self.tokens.next();
+
+            let term = self.parse_term()?;
+            expr = ParserNode::Operation(Box::new(expr), Box::new(term), op);
+        }
+
+        Ok(expr)
+    }
+
     fn parse_term(&mut self) -> ParseResult {
         let mut expr = self.parse_factor()?;
 
@@ -307,7 +373,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_factor(&mut self) -> ParseResult {
-        let mut expr = self.parse_primary()?;
+        let mut expr = self.parse_unary()?;
 
         while (self.tokens.peek().is_some()) {
             let op = match self.tokens.peek().unwrap() {
@@ -319,7 +385,7 @@ impl<'a> Parser<'a> {
 
             self.tokens.next();
 
-            let term = self.parse_primary()?;
+            let term = self.parse_unary()?;
             expr = ParserNode::Operation(Box::new(expr), Box::new(term), op);
         }
 

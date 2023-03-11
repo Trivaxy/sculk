@@ -20,6 +20,27 @@ pub enum Token {
     #[token("%")]
     Modulo,
 
+    #[token(">")]
+    GreaterThan,
+
+    #[token("<")]
+    LessThan,
+
+    #[token(">=")]
+    GreaterThanOrEquals,
+
+    #[token("<=")]
+    LessThanOrEquals,
+
+    #[token("==")]
+    EqualsEquals,
+
+    #[token("!=")]
+    NotEquals,
+
+    #[token("!")]
+    Not,
+
     #[token("(")]
     LeftParens,
 
@@ -59,7 +80,7 @@ pub enum Token {
     #[token("->")]
     Arrow,
 
-    #[regex(r"[a-zA-Z_-]+[a-zA-Z0-9_-]*", |tok| tok.slice().to_owned())]
+    #[regex(r"[a-zA-Z_]+[a-zA-Z0-9_]*", |tok| tok.slice().to_owned())]
     Identifier(String),
 
     #[regex(r"@[p|r|a|e|s]", |tok| tok.slice().chars().nth(1).unwrap())]

@@ -77,7 +77,9 @@ impl CodeGenerator {
             ParserNode::FunctionCall { name, args } => self.visit_function_call(name, args),
             ParserNode::Return(expr) => self.visit_return(expr),
             ParserNode::Block(nodes) => self.visit_block(nodes),
-            _ => todo!()
+            ParserNode::SelectorLiteral(selector) => todo!(),
+            ParserNode::TypedIdentifier { .. } => {},
+            ParserNode::Unary(expr, op) => self.visit_unary(expr, *op),
         }
 
         if self.bin_op_depth == 0 {
@@ -126,6 +128,22 @@ impl CodeGenerator {
         self.bin_op_depth -= 1;
     }
 
+    fn visit_unary(&mut self, expr: &ParserNode, op: Operation) {
+        match op {
+            Operation::Negate => {
+                self.visit_node(expr);
+                self.eval_instrs.push(EvaluationInstruction::PushNumber(-1));
+                self.eval_instrs.push(EvaluationInstruction::Operation(Operation::Multiply));
+            },
+            Operation::Not => {
+                self.eval_instrs.push(EvaluationInstruction::PushNumber(1));
+                self.visit_node(expr);
+                self.eval_instrs.push(EvaluationInstruction::Operation(Operation::Subtract));
+            },
+            _ => unreachable!()
+        }
+    }
+
     fn visit_variable_declaration(&mut self, name: &str, val: &ParserNode) {
         self.visit_node(val);
         let name = Self::var_name(name);
@@ -167,6 +185,7 @@ impl CodeGenerator {
     }
 
     // TODO: check if the stack is malformed, will help in catching bugs
+    // TODO: function calls will overwrite
     fn flush_eval_instrs(&mut self) {
         if self.eval_instrs.is_empty() {
             return;
@@ -212,6 +231,27 @@ impl CodeGenerator {
                         Operation::Multiply => self.emit_action(Action::MultiplyVariables { first: tmp_a_var, second: tmp_b_var }),
                         Operation::Divide => self.emit_action(Action::DivideVariables { first: tmp_a_var, second: tmp_b_var }),
                         Operation::Modulo => self.emit_action(Action::ModuloVariables { first: tmp_a_var, second: tmp_b_var }),
+                        Operation::GreaterThan => {
+                            self.emit_action(Action::SubtractVariables { first: tmp_a_var.clone(), second: tmp_b_var.clone() });
+                            self.emit_action(Action::ExecuteIf { condition: format!("score {} _SCULK matches 1..", &tmp_a_var), then: Box::new(Action::SetVariableToNumber { name: tmp_a_var, val: 1 }) });
+                        }
+                        Operation::LessThan => {
+                            self.emit_action(Action::SubtractVariables { first: tmp_a_var.clone(), second: tmp_b_var.clone() });
+                            self.emit_action(Action::ExecuteIf { condition: format!("score {} _SCULK matches ..-1", &tmp_a_var), then: Box::new(Action::SetVariableToNumber { name: tmp_a_var, val: 1 }) });
+                        }
+                        Operation::GreaterThanOrEquals => {
+                            self.emit_action(Action::SubtractVariables { first: tmp_a_var.clone(), second: tmp_b_var.clone() });
+                            self.emit_action(Action::ExecuteIf { condition: format!("score {} _SCULK matches 0..", &tmp_a_var), then: Box::new(Action::SetVariableToNumber { name: tmp_a_var, val: 1 }) });
+                        }
+                        Operation::LessThanOrEquals => {
+                            self.emit_action(Action::SubtractVariables { first: tmp_a_var.clone(), second: tmp_b_var.clone() });
+                            self.emit_action(Action::ExecuteIf { condition: format!("score {} _SCULK matches ..0", &tmp_a_var), then: Box::new(Action::SetVariableToNumber { name: tmp_a_var, val: 1 }) });
+                        }
+                        Operation::CheckEquals => {
+                            self.emit_action(Action::SubtractVariables { first: tmp_a_var.clone(), second: tmp_b_var.clone() });
+                            self.emit_action(Action::ExecuteIf { condition: format!("score {} _SCULK matches 0", &tmp_a_var), then: Box::new(Action::SetVariableToNumber { name: tmp_a_var, val: 1 }) });
+                        },
+                        _ => panic!("unsupported operation: {:?}", op),
                     }
 
                     // tmp_b is no longer needed, free it
@@ -268,7 +308,11 @@ impl CodeGenerator {
             Action::DivideVariables { first, second } => str.push_str(&format!("scoreboard players operation {} _SCULK /= {} _SCULK", first, second)),
             Action::ModuloVariables { first, second } => str.push_str(&format!("scoreboard players operation {} _SCULK %= {} _SCULK", first, second)),
             Action::SetVariableToVariable { first, second } => str.push_str(&format!("scoreboard players operation {} _SCULK = {} _SCULK", first, second)),
-            Action::CallFunction { target } => str.push_str(&format!("function {}", target))
+            Action::CallFunction { target } => str.push_str(&format!("function {}", target)),
+            Action::ExecuteIf { condition, then } => {
+                str.push_str(&format!("execute if {} run ", condition));
+                Self::write_action(str, then);
+            }
         }
     }
 
@@ -288,7 +332,8 @@ enum Action {
     DivideVariables { first: String, second: String },
     ModuloVariables { first: String, second: String },
     SetVariableToVariable { first: String, second: String },
-    CallFunction { target: String }
+    CallFunction { target: String },
+    ExecuteIf { condition: String, then: Box<Action> }
 }
 
 #[derive(Debug, Clone)]
