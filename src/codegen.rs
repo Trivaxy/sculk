@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap};
+use std::{collections::{HashSet, HashMap}, path::Path, io::Write};
 
 use crate::{parser::{ParserNode, Parser, ParseError, Operation}, types::SculkType};
 
@@ -7,26 +7,29 @@ pub struct CodeGenerator {
     ready_functions: Vec<Function>,
     available_tmps: Vec<i32>,
     max_tmps: i32,
-    output: String,
     eval_instrs: Vec<EvaluationInstruction>,
     bin_op_depth: i32,
+    namespace: String
 }
 
 impl CodeGenerator {
-    pub fn compile_src(src: &str) -> Result<Self, Vec<CompileError>> {
+    pub fn compile_src(src: &str, namespace: &str) -> Result<Self, Vec<CompileError>> {
         let mut parser = Parser::new(src);
         
         match parser.parse() {
             Ok(ast) => {
-                dbg!(&ast);
+                let mut sculk_main = Function::new_empty("_sculkmain".to_string(), vec![], None);
+                sculk_main.actions.push(Action::CreateStorage { name: "_SCULK".to_string() });
+                sculk_main.actions.push(Action::CallFunction { target: format!("{}:{}", namespace, "main") });
+
                 let mut gen = Self {
-                    unfinished_functions: vec![Function::new_empty("main".to_string(), vec![], None)],
-                    ready_functions: vec![],
+                    unfinished_functions: vec![],
+                    ready_functions: vec![sculk_main],
                     available_tmps: vec![2, 1, 0],
                     max_tmps: 2,
-                    output: String::with_capacity(8192),
                     eval_instrs: vec![],
-                    bin_op_depth: 0
+                    bin_op_depth: 0,
+                    namespace: namespace.to_string()
                 };
 
                 gen.compile(&ast);
@@ -36,9 +39,30 @@ impl CodeGenerator {
         }
     }
 
+    // TODO: no more unwraps here
+    pub fn output_to_dir(&self, dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        let mut output = String::new();
+
+        for func in &self.ready_functions {
+            for action in &func.actions {
+                Self::write_action(&mut output, &action);
+                output.push_str("\r\n");
+            }
+
+            let mut path = dir.to_path_buf();
+            path.push(&func.name);
+            path.set_extension("mcfunction");
+
+            let mut file = std::fs::File::create(path).unwrap();
+            file.write(output.as_bytes()).unwrap();
+
+            output.clear();
+        }
+    }
+
     fn compile(&mut self, ast: &ParserNode) {
         self.visit_node(ast);
-        self.compile_to_mcfunctions();
     }
 
     fn visit_node(&mut self, node: &ParserNode) {
@@ -121,7 +145,7 @@ impl CodeGenerator {
             self.emit_action(Action::SetVariableToVariable { first: format!("_ARG{}{}", name, i), second: Self::get_tmp(0) });
         }
 
-        self.emit_action(Action::CallFunction { target: name.to_string() });
+        self.emit_action(Action::CallFunction { target: self.resource_location(name) });
     }
 
     // TODO: we have a big problem. returns work fine if there is only one at the end of the method
@@ -226,25 +250,17 @@ impl CodeGenerator {
         self.available_tmps.push(num);
     }
 
-    fn compile_to_mcfunctions(&mut self) {
-        self.output.push_str("scoreboard objectives add _SCULK dummy\n");
-
-        for function in &self.ready_functions {
-            self.output.push_str(&format!("\r\n# function {}\n", function.name));
-
-            for action in &function.actions {
-                Self::write_action(&mut self.output, action);
-                self.output.push_str("\r\n");
-            }
-        }
-    }
-
     fn get_tmp(num: i32) -> String {
         format!("_TMP{}", num)
     }
 
+    fn resource_location(&self, path: &str) -> String {
+        format!("{}:{}", self.namespace, path)
+    }
+
     fn write_action(str: &mut String, action: &Action) {
         match action {
+            Action::CreateStorage { name } => str.push_str(&format!("scoreboard objectives add {} dummy", name)),
             Action::SetVariableToNumber { name, val } => str.push_str(&format!("scoreboard players set {} _SCULK {}", name, val)),
             Action::AddVariables { first, second } => str.push_str(&format!("scoreboard players operation {} _SCULK += {} _SCULK", first, second)),
             Action::SubtractVariables { first, second } => str.push_str(&format!("scoreboard players operation {} _SCULK -= {} _SCULK", first, second)),
@@ -256,10 +272,6 @@ impl CodeGenerator {
         }
     }
 
-    pub fn get_output(&self) -> &str {
-        &self.output
-    }
-
     fn var_name(name: &str) -> String {
         format!("_VAR_{}", name)
     }
@@ -268,6 +280,7 @@ impl CodeGenerator {
 
 #[derive(Debug)]
 enum Action {
+    CreateStorage { name: String },
     SetVariableToNumber { name: String, val: i32 },
     AddVariables { first: String, second: String },
     SubtractVariables { first: String, second: String },
