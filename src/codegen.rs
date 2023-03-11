@@ -47,6 +47,7 @@ impl CodeGenerator {
     fn visit_node(&mut self, node: &ParserNode) {
         match node {
             ParserNode::NumberLiteral(num) => self.visit_number(*num),
+            ParserNode::BoolLiteral(bool) => self.visit_bool(*bool),
             ParserNode::Identifier(name) => self.visit_identifier(name),
             ParserNode::Operation(lhs, rhs, op) => self.visit_binary_operation(lhs, rhs, *op),
             ParserNode::VariableDeclaration { name, expr, ty: _ } => self.visit_variable_declaration(name, expr),
@@ -77,6 +78,10 @@ impl CodeGenerator {
 
     fn visit_number(&mut self, num: i32) {
         self.eval_instrs.push(EvaluationInstruction::PushNumber(num));
+    }
+
+    fn visit_bool(&mut self, bool: bool) {
+        self.eval_instrs.push(EvaluationInstruction::PushBool(bool));
     }
 
     // TODO: implement shadowing
@@ -158,6 +163,13 @@ impl CodeGenerator {
                     let tmp_idx = self.reserve_available_tmp();
                     let tmp_var = Self::get_tmp(tmp_idx);
                     self.emit_action(Action::SetVariableToNumber { name: tmp_var, val: num });
+                    intermediate_tmps.push(tmp_idx);
+                }
+                EvaluationInstruction::PushBool(bool) => {
+                    let tmp_idx = self.reserve_available_tmp();
+                    let tmp_var = Self::get_tmp(tmp_idx);
+                    let bool_val = if bool { 1 } else { 0 };
+                    self.emit_action(Action::SetVariableToNumber { name: tmp_var, val: bool_val });
                     intermediate_tmps.push(tmp_idx);
                 }
                 EvaluationInstruction::PushVariable(name) => {
@@ -272,6 +284,7 @@ enum Action {
 #[derive(Debug, Clone)]
 enum EvaluationInstruction {
     PushNumber(i32),
+    PushBool(bool),
     PushVariable(String),
     Operation(Operation)
 }

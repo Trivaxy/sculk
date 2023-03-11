@@ -44,6 +44,9 @@ pub enum Token {
     #[token("return")]
     Return,
 
+    #[regex(r"true|false", |tok| tok.slice().parse())]
+    Bool(bool),
+
     #[token("=")]
     Equals,
 

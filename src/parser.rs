@@ -18,6 +18,7 @@ pub enum ParserNode {
     Program(Vec<ParserNode>),
     Block(Vec<ParserNode>),
     NumberLiteral(i32),
+    BoolLiteral(bool),
     SelectorLiteral(SelectorTarget),
     Identifier(String),
     TypedIdentifier { name: String, ty: SculkType },
@@ -226,6 +227,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_bool(&mut self) -> ParseResult {
+        let tok = self.tokens.next();
+
+        match tok {
+            Some(Token::Bool(b)) => Ok(ParserNode::BoolLiteral(*b)),
+            _ => self.error("expected bool"),
+        }
+    }
+
     fn parse_selector(&mut self) -> ParseResult {
         let tok = self.tokens.next();
 
@@ -254,6 +264,7 @@ impl<'a> Parser<'a> {
     fn parse_primary(&mut self) -> ParseResult {
         match self.tokens.peek() {
             Some(Token::Number(_)) => self.parse_number(),
+            Some(Token::Bool(_)) => self.parse_bool(),
             Some(Token::Identifier(_)) => {
                 let identifier = self.parse_identifier()?;
 
@@ -331,6 +342,7 @@ impl<'a> Parser<'a> {
             Some(Token::Identifier(name)) => match name.as_str() {
                 "int" => SculkType::Integer,
                 "selector" => SculkType::Selector,
+                "bool" => SculkType::Bool,
                 _ => SculkType::Struct(name.clone())
             }
             _ => return self.error("expected valid type"),
