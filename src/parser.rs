@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::{iter::Peekable, collections::HashMap};
 
 use logos::{Lexer, Logos};
 
@@ -81,6 +81,7 @@ macro_rules! expect_tok {
 pub struct Parser<'a> {
     tokens: TokenStream<'a>,
     errors: Vec<ParseError>,
+    func_defs: HashMap<String, FunctionDefinition>
 }
 
 impl<'a> Parser<'a> {
@@ -88,10 +89,11 @@ impl<'a> Parser<'a> {
         Self {
             tokens: TokenStream::new(src),
             errors: Vec::new(),
+            func_defs: HashMap::new()
         }
     }
 
-    pub fn parse(&mut self) -> Result<ParserNode, &[ParseError]> {
+    pub fn parse(&mut self) -> Result<ParserOutput, &[ParseError]> {
         let mut functions = Vec::new();
 
         while self.tokens.peek().is_some() {
@@ -105,7 +107,7 @@ impl<'a> Parser<'a> {
             return Err(&self.errors);
         }
 
-        Ok(ParserNode::Program(functions))
+        Ok(ParserOutput::new(ParserNode::Program(functions), std::mem::replace(&mut self.func_defs, HashMap::new())))
     }
 
     fn parse_block(&mut self) -> ParseResult {
@@ -183,7 +185,10 @@ impl<'a> Parser<'a> {
 
         let body = self.parse_block()?;
 
-        Ok(ParserNode::FunctionDeclaration { name: name.as_identifier().to_string(), args, return_ty, body: Box::new(body) })
+        let name = name.as_identifier().to_string();
+        self.func_defs.insert(name.clone(), FunctionDefinition { name: name.clone(), args: args.iter().map(|arg| arg.as_identifier().to_string()).collect() });
+
+        Ok(ParserNode::FunctionDeclaration { name: name.clone(), args, return_ty, body: Box::new(body) })
     }
 
     fn parse_return_statement(&mut self) -> ParseResult {
@@ -441,6 +446,24 @@ impl<'a> Parser<'a> {
             };
         }
     }
+}
+
+pub struct ParserOutput {
+    pub ast: ParserNode,
+    pub func_defs: HashMap<String, FunctionDefinition>
+}
+
+impl ParserOutput {
+    fn new(ast: ParserNode, func_defs: HashMap<String, FunctionDefinition>) -> Self { Self { ast, func_defs } }
+}
+
+pub struct FunctionDefinition {
+    pub name: String,
+    pub args: Vec<String>,
+}
+
+impl FunctionDefinition {
+    fn new(name: String, args: Vec<String>) -> Self { Self { name, args } }
 }
 
 type ParseResult = Result<ParserNode, ()>;
