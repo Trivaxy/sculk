@@ -1,6 +1,6 @@
 use std::{collections::{HashSet, HashMap}, path::Path, io::Write, fmt::{Display, Formatter}};
 
-use crate::{parser::{ParserNode, Parser, ParseError, Operation, FunctionDefinition}, types::SculkType};
+use crate::{parser::{ParserNode, Parser, ParseError, Operation, FunctionDefinition}, types::SculkType, data::{ScoreboardVariable, ResourceLocation}};
 
 pub struct CodeGenerator {
     unfinished_functions: Vec<Function>,
@@ -246,24 +246,6 @@ impl CodeGenerator {
     }
 }
 
-#[derive(Debug, Clone)]
-struct ScoreboardVariable {
-    scoreboard: String,
-    name: String,
-}
-
-impl ScoreboardVariable {
-    fn new(scoreboard: String, name: String) -> Self {
-        Self { scoreboard, name }
-    }
-}
-
-impl Display for ScoreboardVariable {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.name, self.scoreboard)
-    }
-}
-
 #[derive(Debug)]
 enum Action {
     CreateStorage { name: String },
@@ -312,28 +294,6 @@ pub enum CompileError {
 impl CompileError {
     fn parse_error(error: ParseError) -> Self {
         CompileError::Parse(error)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ResourceLocation {
-    namespace: String,
-    path: String,
-}
-
-impl ResourceLocation {
-    fn new(namespace: String, path: String) -> Self {
-        Self { namespace, path }
-    }
-
-    fn as_scoreboard(&self) -> String {
-        format!("{}_{}", self.namespace, self.path)
-    }
-}
-
-impl Display for ResourceLocation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.namespace, self.path)
     }
 }
 
