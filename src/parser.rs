@@ -1,8 +1,11 @@
-use std::{iter::Peekable, collections::HashMap};
+use std::{collections::HashMap, iter::Peekable};
 
 use logos::{Lexer, Logos};
 
-use crate::{lexer::{Token, TokenStream}, types::SculkType};
+use crate::{
+    lexer::{Token, TokenStream},
+    types::SculkType,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Operation {
@@ -18,7 +21,7 @@ pub enum Operation {
     CheckEquals,
     NotEquals,
     Not,
-    Negate
+    Negate,
 }
 
 #[derive(Clone, Debug)]
@@ -29,27 +32,42 @@ pub enum ParserNode {
     BoolLiteral(bool),
     SelectorLiteral(SelectorTarget),
     Identifier(String),
-    TypedIdentifier { name: String, ty: SculkType },
-    VariableDeclaration { name: String, expr: Box<ParserNode>, ty: Option<SculkType> },
-    FunctionDeclaration { name: String, args: Vec<ParserNode>, return_ty: Option<Box<ParserNode>>, body: Box<ParserNode> },
+    TypedIdentifier {
+        name: String,
+        ty: SculkType,
+    },
+    VariableDeclaration {
+        name: String,
+        expr: Box<ParserNode>,
+        ty: Option<SculkType>,
+    },
+    FunctionDeclaration {
+        name: String,
+        args: Vec<ParserNode>,
+        return_ty: Option<Box<ParserNode>>,
+        body: Box<ParserNode>,
+    },
     Return(Box<ParserNode>),
-    FunctionCall { name: String, args: Vec<ParserNode> },
+    FunctionCall {
+        name: String,
+        args: Vec<ParserNode>,
+    },
     Operation(Box<ParserNode>, Box<ParserNode>, Operation),
-    Unary(Box<ParserNode>, Operation)
+    Unary(Box<ParserNode>, Operation),
 }
 
 impl ParserNode {
     pub fn is_num(&self) -> bool {
         match self {
             Self::NumberLiteral(_) => true,
-            _ => false
+            _ => false,
         }
     }
 
     fn as_num(&self) -> i32 {
         match self {
             Self::NumberLiteral(num) => *num,
-            _ => panic!("tried to get number from non-number node")
+            _ => panic!("tried to get number from non-number node"),
         }
     }
 
@@ -57,14 +75,14 @@ impl ParserNode {
         match self {
             Self::Identifier(name) => name,
             Self::TypedIdentifier { name, .. } => name,
-            _ => panic!("tried to get identifier from non-identifier node")
+            _ => panic!("tried to get identifier from non-identifier node"),
         }
     }
 
     pub fn as_type(&self) -> SculkType {
         match self {
             Self::TypedIdentifier { ty, .. } => ty.clone(),
-            _ => panic!("tried to get type from non-typed identifier node")
+            _ => panic!("tried to get type from non-typed identifier node"),
         }
     }
 }
@@ -81,7 +99,7 @@ macro_rules! expect_tok {
 pub struct Parser<'a> {
     tokens: TokenStream<'a>,
     errors: Vec<ParseError>,
-    func_defs: HashMap<String, FunctionDefinition>
+    func_defs: HashMap<String, FunctionDefinition>,
 }
 
 impl<'a> Parser<'a> {
@@ -89,7 +107,7 @@ impl<'a> Parser<'a> {
         Self {
             tokens: TokenStream::new(src),
             errors: Vec::new(),
-            func_defs: HashMap::new()
+            func_defs: HashMap::new(),
         }
     }
 
@@ -99,7 +117,7 @@ impl<'a> Parser<'a> {
         while self.tokens.peek().is_some() {
             match self.parse_func_declaration() {
                 Ok(stmt) => functions.push(stmt),
-                Err(_) => break // error already logged and handled, we just need to break
+                Err(_) => break, // error already logged and handled, we just need to break
             };
         }
 
@@ -107,7 +125,10 @@ impl<'a> Parser<'a> {
             return Err(&self.errors);
         }
 
-        Ok(ParserOutput::new(ParserNode::Program(functions), std::mem::replace(&mut self.func_defs, HashMap::new())))
+        Ok(ParserOutput::new(
+            ParserNode::Program(functions),
+            std::mem::replace(&mut self.func_defs, HashMap::new()),
+        ))
     }
 
     fn parse_block(&mut self) -> ParseResult {
@@ -146,9 +167,17 @@ impl<'a> Parser<'a> {
         expect_tok!(self, Token::Semicolon, "expected ;");
 
         match identifier {
-            ParserNode::TypedIdentifier { name, ty } => Ok(ParserNode::VariableDeclaration { name, expr: Box::new(expr), ty: Some(ty) }),
-            ParserNode::Identifier(name) => Ok(ParserNode::VariableDeclaration { name, expr: Box::new(expr), ty: None }),
-            _ => self.error("expected identifier")
+            ParserNode::TypedIdentifier { name, ty } => Ok(ParserNode::VariableDeclaration {
+                name,
+                expr: Box::new(expr),
+                ty: Some(ty),
+            }),
+            ParserNode::Identifier(name) => Ok(ParserNode::VariableDeclaration {
+                name,
+                expr: Box::new(expr),
+                ty: None,
+            }),
+            _ => self.error("expected identifier"),
         }
     }
 
@@ -160,7 +189,7 @@ impl<'a> Parser<'a> {
         expect_tok!(self, Token::LeftParens, "expected (");
 
         let mut args = Vec::new();
-        
+
         if self.tokens.peek() != Some(&Token::RightParens) {
             let arg = self.parse_typed_identifier(false)?;
             args.push(arg);
@@ -179,16 +208,30 @@ impl<'a> Parser<'a> {
                 self.tokens.next(); // consume the arrow
                 let return_ty = self.parse_identifier()?;
                 Some(Box::new(return_ty))
-            },
-            _ => None
+            }
+            _ => None,
         };
 
         let body = self.parse_block()?;
 
         let name = name.as_identifier().to_string();
-        self.func_defs.insert(name.clone(), FunctionDefinition { name: name.clone(), args: args.iter().map(|arg| arg.as_identifier().to_string()).collect() });
+        self.func_defs.insert(
+            name.clone(),
+            FunctionDefinition {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| arg.as_identifier().to_string())
+                    .collect(),
+            },
+        );
 
-        Ok(ParserNode::FunctionDeclaration { name: name.clone(), args, return_ty, body: Box::new(body) })
+        Ok(ParserNode::FunctionDeclaration {
+            name: name.clone(),
+            args,
+            return_ty,
+            body: Box::new(body),
+        })
     }
 
     fn parse_return_statement(&mut self) -> ParseResult {
@@ -283,7 +326,9 @@ impl<'a> Parser<'a> {
                 let identifier = self.parse_identifier()?;
 
                 match self.tokens.peek() {
-                    Some(Token::LeftParens) => self.parse_func_call(identifier.as_identifier().to_string()),
+                    Some(Token::LeftParens) => {
+                        self.parse_func_call(identifier.as_identifier().to_string())
+                    }
                     _ => Ok(identifier),
                 }
             }
@@ -414,8 +459,8 @@ impl<'a> Parser<'a> {
                 "int" => SculkType::Integer,
                 "selector" => SculkType::Selector,
                 "bool" => SculkType::Bool,
-                _ => SculkType::Struct(name.clone())
-            }
+                _ => SculkType::Struct(name.clone()),
+            },
             _ => return self.error("expected valid type"),
         };
 
@@ -450,11 +495,13 @@ impl<'a> Parser<'a> {
 
 pub struct ParserOutput {
     pub ast: ParserNode,
-    pub func_defs: HashMap<String, FunctionDefinition>
+    pub func_defs: HashMap<String, FunctionDefinition>,
 }
 
 impl ParserOutput {
-    fn new(ast: ParserNode, func_defs: HashMap<String, FunctionDefinition>) -> Self { Self { ast, func_defs } }
+    fn new(ast: ParserNode, func_defs: HashMap<String, FunctionDefinition>) -> Self {
+        Self { ast, func_defs }
+    }
 }
 
 pub struct FunctionDefinition {
@@ -463,7 +510,9 @@ pub struct FunctionDefinition {
 }
 
 impl FunctionDefinition {
-    fn new(name: String, args: Vec<String>) -> Self { Self { name, args } }
+    fn new(name: String, args: Vec<String>) -> Self {
+        Self { name, args }
+    }
 }
 
 type ParseResult = Result<ParserNode, ()>;

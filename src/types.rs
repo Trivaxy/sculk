@@ -3,5 +3,5 @@ pub enum SculkType {
     Integer,
     Bool,
     Selector,
-    Struct(String)
+    Struct(String),
 }
