@@ -230,6 +230,10 @@ impl CodeGenerator {
                 str.push_str(&format!("execute if {} run ", condition));
                 Self::write_action(str, then);
             }
+            Action::ExecuteUnless { condition, then } => {
+                str.push_str(&format!("execute unless {} run ", condition));
+                Self::write_action(str, then);
+            }
         }
     }
 
@@ -271,7 +275,8 @@ enum Action {
     ModuloVariables { first: ScoreboardVariable, second: ScoreboardVariable },
     SetVariableToVariable { first: ScoreboardVariable, second: ScoreboardVariable },
     CallFunction { target: ResourceLocation },
-    ExecuteIf { condition: String, then: Box<Action> }
+    ExecuteIf { condition: String, then: Box<Action> },
+    ExecuteUnless { condition: String, then: Box<Action> }
 }
 
 struct Function {
@@ -433,6 +438,10 @@ impl EvaluationStack {
                         Operation::CheckEquals => {
                             self.emit_action(Action::SubtractVariables { first: tmp_a_var.clone(), second: tmp_b_var.clone() });
                             self.emit_action(Action::ExecuteIf { condition: format!("score {} matches 0", &tmp_a_var), then: Box::new(Action::SetVariableToNumber { var: tmp_a_var, val: 1 }) });
+                        },
+                        Operation::NotEquals => {
+                            self.emit_action(Action::SubtractVariables { first: tmp_a_var.clone(), second: tmp_b_var.clone() });
+                            self.emit_action(Action::ExecuteUnless { condition: format!("score {} matches 0", &tmp_a_var), then: Box::new(Action::SetVariableToNumber { var: tmp_a_var, val: 1 }) });
                         },
                         _ => panic!("unsupported operation: {:?}", op),
                     }
