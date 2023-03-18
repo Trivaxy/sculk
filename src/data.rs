@@ -2,19 +2,19 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone)]
 pub struct ScoreboardVariable {
-    pub scoreboard: String,
+    pub scoreboard: ResourceLocation,
     pub name: String,
 }
 
 impl ScoreboardVariable {
-    pub fn new(scoreboard: String, name: String) -> Self {
+    pub fn new(scoreboard: ResourceLocation, name: String) -> Self {
         Self { scoreboard, name }
     }
 }
 
 impl Display for ScoreboardVariable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.name, self.scoreboard)
+        write!(f, "{} {}", self.name, self.scoreboard.as_scoreboard())
     }
 }
 

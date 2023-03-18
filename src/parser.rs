@@ -54,6 +54,7 @@ pub enum ParserNode {
     },
     Operation(Box<ParserNode>, Box<ParserNode>, Operation),
     Unary(Box<ParserNode>, Operation),
+    If(Box<ParserNode>, Box<ParserNode>),
 }
 
 impl ParserNode {
@@ -149,6 +150,7 @@ impl<'a> Parser<'a> {
         match self.tokens.peek() {
             Some(Token::Let) => self.parse_var_declaration(),
             Some(Token::Fn) => self.parse_func_declaration(),
+            Some(Token::If) => self.parse_if(),
             Some(Token::LeftBrace) => self.parse_block(),
             Some(Token::Return) => self.parse_return_statement(),
             _ => self.parse_expression_statement(), // TODO: maybe this should just become exclusive to function calls
@@ -263,6 +265,18 @@ impl<'a> Parser<'a> {
         expect_tok!(self, Token::RightParens, "expected )");
 
         Ok(ParserNode::FunctionCall { name, args })
+    }
+
+    fn parse_if(&mut self) -> ParseResult {
+        expect_tok!(self, Token::If, "expected if");
+
+        let cond = self.parse_expression()?;
+        let body = self.parse_block()?;
+
+        Ok(ParserNode::If(
+            Box::new(cond),
+            Box::new(body)
+        ))
     }
 
     fn parse_expression_statement(&mut self) -> ParseResult {

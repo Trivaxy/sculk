@@ -65,6 +65,9 @@ pub enum Token {
     #[token("return")]
     Return,
 
+    #[token("if")]
+    If,
+
     #[regex(r"true|false", |tok| tok.slice().parse())]
     Bool(bool),
 

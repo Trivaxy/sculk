@@ -1,8 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::{Display, Formatter},
+    fmt::{Display, Formatter, format},
     io::Write,
-    path::Path,
+    path::Path, sync::atomic::{AtomicI32, Ordering},
 };
 
 use crate::{
@@ -17,6 +17,8 @@ pub struct CodeGenerator {
     func_defs: HashMap<String, FunctionDefinition>,
     eval_stacks: Vec<EvaluationStack>,
     bin_op_depth: i32,
+    anon_func_depth: i32,
+    flag_tmp_count: i32,
     namespace: String,
 }
 
@@ -26,7 +28,7 @@ impl CodeGenerator {
 
         match parser.parse() {
             Ok(parse_output) => {
-                let mut sculk_main = Function::new_empty("_sculkmain".to_string(), vec![], None);
+                let mut sculk_main = Function::new_empty("_sculkmain".to_string(), ResourceLocation::new(namespace.to_string(), "_sculkmain".to_string()), vec![], None);
 
                 let mut gen = Self {
                     unfinished_functions: vec![],
@@ -34,14 +36,16 @@ impl CodeGenerator {
                     func_defs: parse_output.func_defs,
                     eval_stacks: vec![],
                     bin_op_depth: 0,
+                    anon_func_depth: 0,
+                    flag_tmp_count: 0,
                     namespace: namespace.to_string(),
                 };
 
                 gen.compile(&parse_output.ast);
 
-                for (_, func) in &gen.ready_functions {
+                for func in gen.ready_functions.values().filter(|func| !func.anonymous) {
                     sculk_main.actions.push(Action::CreateStorage {
-                        name: ResourceLocation::new(namespace.to_string(), "main".to_string())
+                        name: ResourceLocation::new(namespace.to_string(), func.name.clone())
                             .as_scoreboard(),
                     });
                 }
@@ -111,6 +115,7 @@ impl CodeGenerator {
             ParserNode::SelectorLiteral(selector) => todo!(),
             ParserNode::TypedIdentifier { .. } => {}
             ParserNode::Unary(expr, op) => self.visit_unary(expr, *op),
+            ParserNode::If(expr, body) => self.visit_if(expr, body),
         }
     }
 
@@ -168,7 +173,7 @@ impl CodeGenerator {
     }
 
     fn visit_variable_declaration(&mut self, name: &str, val: &ParserNode) {
-        self.begin_evaluation_for_func_name(self.current_function().name.clone(), 0);
+        self.begin_evaluation_for_scoreboard(self.current_function().scoreboard.clone(), 0);
         self.visit_node(val);
         let result_tmp = self.end_current_evaluation();
         let var = self.local_variable(name);
@@ -188,6 +193,7 @@ impl CodeGenerator {
     ) {
         self.unfinished_functions.push(Function::new_empty(
             name.to_string(),
+            self.resource_location(name),
             args.iter()
                 .map(|node| node.as_identifier().to_string())
                 .collect(),
@@ -196,8 +202,14 @@ impl CodeGenerator {
                 .map(|node| node.as_identifier().to_string()),
         ));
         self.visit_node(body);
-        self.ready_functions
-            .insert(name.to_string(), self.unfinished_functions.pop().unwrap());
+
+        for _ in 0..=self.anon_func_depth {
+            let func = self.unfinished_functions.pop().unwrap();
+            self.ready_functions.insert(func.name.clone(), func);
+        }
+
+        self.anon_func_depth = 0;
+        self.flag_tmp_count = 0;
     }
 
     fn visit_function_call(&mut self, name: &str, args: &[ParserNode]) {
@@ -217,7 +229,7 @@ impl CodeGenerator {
     // it's likely we will need to compile paths that end in a return to separate functions, and then call them as needed
     // the easier but more inefficient option is to wrap every generated command in a "execute unless [we have returned] ..."
     fn visit_return(&mut self, expr: &ParserNode) {
-        self.begin_evaluation_for_func_name(self.current_function().name.clone(), 0);
+        self.begin_evaluation_for_scoreboard(self.current_function().scoreboard.clone(), 0);
         self.visit_node(expr);
         let result_tmp = self.end_current_evaluation();
         self.emit_action(Action::SetVariableToVariable {
@@ -226,7 +238,36 @@ impl CodeGenerator {
         });
     }
 
+    fn visit_if(&mut self, cond: &ParserNode, body: &ParserNode) {
+        self.begin_evaluation_for_scoreboard(self.current_function().scoreboard.clone(), 0);
+        self.visit_node(cond);
+        let cond_tmp = self.end_current_evaluation();
 
+        // preserve the condition in a flag, as the tmp may be overwritten
+        self.emit_action(Action::SetVariableToVariable {
+            first: self.get_flag(self.flag_tmp_count),
+            second: self.get_tmp(cond_tmp)
+        });
+
+        let if_func = self.current_function().make_anonymous_child();
+        self.unfinished_functions.push(if_func);
+        self.visit_node(body);
+
+        let if_func = self.unfinished_functions.pop().unwrap();
+        let if_func_name = if_func.name.clone();
+        self.ready_functions.insert(if_func.name.clone(), if_func);
+
+        self.emit_action(Action::ExecuteIf { condition: format!("score {} matches 1", self.get_flag(self.flag_tmp_count)), then: Box::new(Action::CallFunction { target: self.resource_location(&if_func_name) }) });
+
+        let hidden_else_func = self.current_function().make_anonymous_child();
+        let hidden_else_func_name = hidden_else_func.name.clone();
+
+        self.emit_action(Action::ExecuteUnless { condition: format!("score {} matches 1", self.get_flag(self.flag_tmp_count)), then: Box::new(Action::CallFunction { target: self.resource_location(&hidden_else_func_name) }) });
+
+        self.unfinished_functions.push(hidden_else_func); // the rest of the function will now reside in this anonymous function
+        self.anon_func_depth += 1;
+        self.flag_tmp_count += 1;
+    }
 
     fn emit_action(&mut self, action: Action) {
         self.current_function_mut().actions.push(action);
@@ -248,9 +289,13 @@ impl CodeGenerator {
         self.local_variable(&format!("_TMP{}", num))
     }
 
-    fn begin_evaluation_for_func_name(&mut self, name: String, min_tmp: i32) {
+    fn get_flag(&self, num: i32) -> ScoreboardVariable {
+        self.local_variable(&format!("_FLAG{}", num))
+    }
+
+    fn begin_evaluation_for_scoreboard(&mut self, scoreboard: ResourceLocation, min_tmp: i32) {
         self.eval_stacks
-            .push(EvaluationStack::new(self.resource_location(&name), min_tmp));
+            .push(EvaluationStack::new(scoreboard, min_tmp));
     }
 
     fn end_current_evaluation(&mut self) -> i32 {
@@ -315,11 +360,7 @@ impl CodeGenerator {
     }
 
     fn local_variable(&self, name: &str) -> ScoreboardVariable {
-        ScoreboardVariable::new(
-            self.resource_location(&self.current_function().name)
-                .as_scoreboard(),
-            name.to_string(),
-        )
+        ScoreboardVariable::new(self.current_function().scoreboard.clone(), name.to_string())
     }
 }
 
@@ -371,16 +412,21 @@ enum Action {
 
 struct Function {
     name: String,
+    scoreboard: ResourceLocation,
     args: HashMap<String, usize>,
     idx_to_arg: HashMap<usize, String>,
     return_ty: Option<String>, // TODO: convert to Option<SculkType>
     actions: Vec<Action>,
+    anonymous: bool
 }
 
+static ANONYMOUS_FUNC_COUNT: AtomicI32 = AtomicI32::new(0);
+
 impl Function {
-    fn new_empty(name: String, args: Vec<String>, return_ty: Option<String>) -> Self {
+    fn new_empty(name: String, scoreboard: ResourceLocation, args: Vec<String>, return_ty: Option<String>) -> Self {
         Function {
             name,
+            scoreboard,
             args: args
                 .iter()
                 .enumerate()
@@ -393,14 +439,27 @@ impl Function {
                 .collect(),
             return_ty,
             actions: Vec::new(),
+            anonymous: false,
         }
     }
 
-    fn get_arg(&self, idx: usize) -> ScoreboardVariable {
-        ScoreboardVariable::new(
-            self.name.clone(),
-            self.idx_to_arg.get(&idx).unwrap().clone(),
-        )
+    fn new_empty_mapped_args(name: String, scoreboard: ResourceLocation, args: HashMap<String, usize>, idx_to_arg: HashMap<usize, String>, return_ty: Option<String>) -> Self {
+        Function {
+            name,
+            scoreboard,
+            args,
+            idx_to_arg,
+            return_ty,
+            actions: Vec::new(),
+            anonymous: false,
+        }
+    }
+
+    fn make_anonymous_child(&self) -> Self {
+        let mut func = Function::new_empty_mapped_args(format!("{}_anon_{}", &self.name, ANONYMOUS_FUNC_COUNT.load(Ordering::Relaxed)), self.scoreboard.clone(), self.args.clone(), self.idx_to_arg.clone(), self.return_ty.clone());
+        ANONYMOUS_FUNC_COUNT.fetch_add(1, Ordering::SeqCst);
+        func.anonymous = true;
+        func
     }
 }
 
@@ -439,17 +498,17 @@ struct EvaluationStack {
     actions: Vec<Action>,
     available_tmps: Vec<i32>,
     max_tmps: i32,
-    func: ResourceLocation,
+    scoreboard: ResourceLocation,
 }
 
 impl EvaluationStack {
-    fn new(func: ResourceLocation, min_tmp: i32) -> Self {
+    fn new(scoreboard: ResourceLocation, min_tmp: i32) -> Self {
         EvaluationStack {
             instructions: Vec::new(),
             actions: Vec::new(),
             available_tmps: Vec::new(),
             max_tmps: min_tmp,
-            func,
+            scoreboard,
         }
     }
 
@@ -613,7 +672,7 @@ impl EvaluationStack {
                     for i in 0..args.len() {
                         let arg_tmp = self.get_tmp(arg_tmps[i]);
                         self.emit_action(Action::SetVariableToVariable {
-                            first: ScoreboardVariable::new(func.as_scoreboard(), args[i].clone()),
+                            first: ScoreboardVariable::new(func.clone(), args[i].clone()),
                             second: arg_tmp,
                         });
                     }
@@ -629,7 +688,7 @@ impl EvaluationStack {
                     let ret_tmp = self.reserve_available_tmp();
                     self.emit_action(Action::SetVariableToVariable {
                         first: self.get_tmp(ret_tmp),
-                        second: ScoreboardVariable::new(func.as_scoreboard(), "_RET".to_string()),
+                        second: ScoreboardVariable::new(func.clone(), "_RET".to_string()),
                     });
                     intermediate_tmps.push(ret_tmp);
                 }
@@ -679,10 +738,10 @@ impl EvaluationStack {
     }
 
     fn get_tmp(&self, num: i32) -> ScoreboardVariable {
-        ScoreboardVariable::new(self.func.as_scoreboard(), format!("_TMP{}", num))
+        ScoreboardVariable::new(self.scoreboard.clone(), format!("_TMP{}", num))
     }
 
     fn local_variable(&self, str: &str) -> ScoreboardVariable {
-        ScoreboardVariable::new(self.func.as_scoreboard(), str.to_string())
+        ScoreboardVariable::new(self.scoreboard.clone(), str.to_string())
     }
 }
