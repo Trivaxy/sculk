@@ -200,9 +200,6 @@ impl CodeGenerator {
             .insert(name.to_string(), self.unfinished_functions.pop().unwrap());
     }
 
-    // TODO: function calls are broken. there needs to be an evaluation stack for every argument instead of using the binop one
-    // furthermore, i think they probably can overwrite tmps that are in-use in the middle of a calculation
-    // maybe every function finally needs its own collection of tmps
     fn visit_function_call(&mut self, name: &str, args: &[ParserNode]) {
         for arg in args.iter() {
             self.visit_node(arg);
@@ -228,6 +225,8 @@ impl CodeGenerator {
             second: self.get_tmp(result_tmp),
         });
     }
+
+
 
     fn emit_action(&mut self, action: Action) {
         self.current_function_mut().actions.push(action);
