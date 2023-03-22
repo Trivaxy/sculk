@@ -1,15 +1,17 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::{Display, Formatter, format},
+    fmt::{format, Display, Formatter},
     io::Write,
-    path::Path, sync::atomic::{AtomicI32, Ordering},
+    path::Path,
+    sync::atomic::{AtomicI32, Ordering},
 };
 
 use crate::{
     data::{ResourceLocation, ScoreboardVariable},
     parser::{FunctionDefinition, Operation, ParseError, Parser, ParserNode},
-    types::SculkType,
 };
+
+use super::rebranch;
 
 pub struct CodeGenerator {
     unfinished_functions: Vec<Function>,
@@ -27,8 +29,15 @@ impl CodeGenerator {
         let mut parser = Parser::new(src);
 
         match parser.parse() {
-            Ok(parse_output) => {
-                let mut sculk_main = Function::new_empty("_sculkmain".to_string(), ResourceLocation::new(namespace.to_string(), "_sculkmain".to_string()), vec![], None);
+            Ok(mut parse_output) => {
+                rebranch::rebranch(&mut parse_output.ast);
+
+                let mut sculk_main = Function::new_empty(
+                    "_sculkmain".to_string(),
+                    ResourceLocation::new(namespace.to_string(), "_sculkmain".to_string()),
+                    vec![],
+                    None,
+                );
 
                 let mut gen = Self {
                     unfinished_functions: vec![],
@@ -115,7 +124,12 @@ impl CodeGenerator {
             ParserNode::SelectorLiteral(selector) => todo!(),
             ParserNode::TypedIdentifier { .. } => {}
             ParserNode::Unary(expr, op) => self.visit_unary(expr, *op),
-            ParserNode::If(expr, body) => self.visit_if(expr, body),
+            ParserNode::If {
+                cond,
+                body,
+                else_ifs,
+                else_body,
+            } => self.visit_if(cond, body, else_ifs, else_body),
         }
     }
 
@@ -173,7 +187,7 @@ impl CodeGenerator {
     }
 
     fn visit_variable_declaration(&mut self, name: &str, val: &ParserNode) {
-        self.begin_evaluation_for_scoreboard(self.current_function().scoreboard.clone(), 0);
+        self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
         self.visit_node(val);
         let result_tmp = self.end_current_evaluation();
         let var = self.local_variable(name);
@@ -183,7 +197,7 @@ impl CodeGenerator {
         });
     }
 
-    // TODO: stop people from defining functions twice
+    // TODO: stop people from defining the same function twice or within other functions
     fn visit_function_declaration(
         &mut self,
         name: &str,
@@ -201,14 +215,17 @@ impl CodeGenerator {
                 .as_ref()
                 .map(|node| node.as_identifier().to_string()),
         ));
-        self.visit_node(body);
 
-        for _ in 0..=self.anon_func_depth {
-            let func = self.unfinished_functions.pop().unwrap();
-            self.ready_functions.insert(func.name.clone(), func);
+        if return_ty.is_some() {
+            self.emit_action(Action::SetVariableToNumber {
+                var: self.local_variable("_RETFLAG"),
+                val: 0,
+            });
         }
 
-        self.anon_func_depth = 0;
+        self.visit_node(body);
+
+        self.ready_functions.insert(name.to_string(), self.unfinished_functions.pop().unwrap());
         self.flag_tmp_count = 0;
     }
 
@@ -223,50 +240,77 @@ impl CodeGenerator {
         ));
     }
 
-    // TODO: we have a big problem. returns work fine if there is only one at the end of the method
-    // but if there are multiple returns on different paths, we need to find a way to "return" from the function
-    // minecraft has no concept of returning from a function, so we need to find a way to emulate it
-    // it's likely we will need to compile paths that end in a return to separate functions, and then call them as needed
-    // the easier but more inefficient option is to wrap every generated command in a "execute unless [we have returned] ..."
     fn visit_return(&mut self, expr: &ParserNode) {
-        self.begin_evaluation_for_scoreboard(self.current_function().scoreboard.clone(), 0);
+        self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
         self.visit_node(expr);
         let result_tmp = self.end_current_evaluation();
-        self.emit_action(Action::SetVariableToVariable {
-            first: self.local_variable("_RET"),
-            second: self.get_tmp(result_tmp),
+
+        self.emit_action(Action::ExecuteIf {
+            condition: format!("score {} matches 0", self.local_variable("_RETFLAG")),
+            then: Box::new(Action::SetVariableToVariable {
+                first: self.local_variable("_RET"),
+                second: self.get_tmp(result_tmp),
+            }),
+        });
+
+        self.emit_action(Action::ExecuteIf {
+            condition: format!("score {} matches 0", self.local_variable("_RETFLAG")),
+            then: Box::new(Action::SetVariableToNumber { var: self.local_variable("_RETFLAG"), val: 1 })
         });
     }
 
-    fn visit_if(&mut self, cond: &ParserNode, body: &ParserNode) {
-        self.begin_evaluation_for_scoreboard(self.current_function().scoreboard.clone(), 0);
+    fn visit_if(
+        &mut self,
+        cond: &ParserNode,
+        body: &ParserNode,
+        _else_ifs: &[(ParserNode, ParserNode)], // at this stage, there are no else-ifs, they have been converted to nested ifs
+        else_body: &Option<Box<ParserNode>>,
+    ) {
+        self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
         self.visit_node(cond);
-        let cond_tmp = self.end_current_evaluation();
+        let result_tmp = self.end_current_evaluation();
+        let flag_tmp = self.flag_tmp_count;
+        self.flag_tmp_count += 1;
 
-        // preserve the condition in a flag, as the tmp may be overwritten
+        let true_func = self.current_function().make_anonymous_child();
+        let true_func_name = true_func.name.clone();
+
+        self.unfinished_functions.push(true_func);
+        self.visit_node(body);
+        self.ready_functions.insert(
+            true_func_name.clone(),
+            self.unfinished_functions.pop().unwrap(),
+        );
+
         self.emit_action(Action::SetVariableToVariable {
-            first: self.get_flag(self.flag_tmp_count),
-            second: self.get_tmp(cond_tmp)
+            first: self.get_flag(flag_tmp),
+            second: self.get_tmp(result_tmp),
+        });
+        self.emit_action(Action::ExecuteIf {
+            condition: format!("score {} matches 1", self.get_flag(flag_tmp)),
+            then: Box::new(Action::CallFunction {
+                target: self.resource_location(&true_func_name),
+            }),
         });
 
-        let if_func = self.current_function().make_anonymous_child();
-        self.unfinished_functions.push(if_func);
-        self.visit_node(body);
+        if let Some(else_body) = else_body {
+            let false_func = self.current_function().make_anonymous_child();
+            let false_func_name = false_func.name.clone();
 
-        let if_func = self.unfinished_functions.pop().unwrap();
-        let if_func_name = if_func.name.clone();
-        self.ready_functions.insert(if_func.name.clone(), if_func);
+            self.unfinished_functions.push(false_func);
+            self.visit_node(else_body);
+            self.ready_functions.insert(
+                false_func_name.clone(),
+                self.unfinished_functions.pop().unwrap(),
+            );
 
-        self.emit_action(Action::ExecuteIf { condition: format!("score {} matches 1", self.get_flag(self.flag_tmp_count)), then: Box::new(Action::CallFunction { target: self.resource_location(&if_func_name) }) });
-
-        let hidden_else_func = self.current_function().make_anonymous_child();
-        let hidden_else_func_name = hidden_else_func.name.clone();
-
-        self.emit_action(Action::ExecuteUnless { condition: format!("score {} matches 1", self.get_flag(self.flag_tmp_count)), then: Box::new(Action::CallFunction { target: self.resource_location(&hidden_else_func_name) }) });
-
-        self.unfinished_functions.push(hidden_else_func); // the rest of the function will now reside in this anonymous function
-        self.anon_func_depth += 1;
-        self.flag_tmp_count += 1;
+            self.emit_action(Action::ExecuteUnless {
+                condition: format!("score {} matches 1", self.get_flag(flag_tmp)),
+                then: Box::new(Action::CallFunction {
+                    target: self.resource_location(&false_func_name),
+                }),
+            });
+        }
     }
 
     fn emit_action(&mut self, action: Action) {
@@ -291,6 +335,10 @@ impl CodeGenerator {
 
     fn get_flag(&self, num: i32) -> ScoreboardVariable {
         self.local_variable(&format!("_FLAG{}", num))
+    }
+
+    fn active_scoreboard(&self) -> ResourceLocation {
+        self.current_function().scoreboard.clone()
     }
 
     fn begin_evaluation_for_scoreboard(&mut self, scoreboard: ResourceLocation, min_tmp: i32) {
@@ -417,13 +465,18 @@ struct Function {
     idx_to_arg: HashMap<usize, String>,
     return_ty: Option<String>, // TODO: convert to Option<SculkType>
     actions: Vec<Action>,
-    anonymous: bool
+    anonymous: bool,
 }
 
 static ANONYMOUS_FUNC_COUNT: AtomicI32 = AtomicI32::new(0);
 
 impl Function {
-    fn new_empty(name: String, scoreboard: ResourceLocation, args: Vec<String>, return_ty: Option<String>) -> Self {
+    fn new_empty(
+        name: String,
+        scoreboard: ResourceLocation,
+        args: Vec<String>,
+        return_ty: Option<String>,
+    ) -> Self {
         Function {
             name,
             scoreboard,
@@ -443,7 +496,13 @@ impl Function {
         }
     }
 
-    fn new_empty_mapped_args(name: String, scoreboard: ResourceLocation, args: HashMap<String, usize>, idx_to_arg: HashMap<usize, String>, return_ty: Option<String>) -> Self {
+    fn new_empty_mapped_args(
+        name: String,
+        scoreboard: ResourceLocation,
+        args: HashMap<String, usize>,
+        idx_to_arg: HashMap<usize, String>,
+        return_ty: Option<String>,
+    ) -> Self {
         Function {
             name,
             scoreboard,
@@ -456,7 +515,16 @@ impl Function {
     }
 
     fn make_anonymous_child(&self) -> Self {
-        let mut func = Function::new_empty_mapped_args(format!("{}_anon_{}", &self.name, ANONYMOUS_FUNC_COUNT.load(Ordering::Relaxed)), self.scoreboard.clone(), self.args.clone(), self.idx_to_arg.clone(), self.return_ty.clone());
+        let mut func = Function::new_empty_mapped_args(
+            format!(
+                "anon_{}",
+                ANONYMOUS_FUNC_COUNT.load(Ordering::Relaxed)
+            ),
+            self.scoreboard.clone(),
+            self.args.clone(),
+            self.idx_to_arg.clone(),
+            self.return_ty.clone(),
+        );
         ANONYMOUS_FUNC_COUNT.fetch_add(1, Ordering::SeqCst);
         func.anonymous = true;
         func

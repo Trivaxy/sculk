@@ -54,7 +54,13 @@ pub enum ParserNode {
     },
     Operation(Box<ParserNode>, Box<ParserNode>, Operation),
     Unary(Box<ParserNode>, Operation),
-    If(Box<ParserNode>, Box<ParserNode>),
+    If {
+        // see rebranch::rebranch
+        cond: Box<ParserNode>,
+        body: Box<ParserNode>,
+        else_ifs: Vec<(ParserNode, ParserNode)>,
+        else_body: Option<Box<ParserNode>>,
+    },
 }
 
 impl ParserNode {
@@ -273,10 +279,30 @@ impl<'a> Parser<'a> {
         let cond = self.parse_expression()?;
         let body = self.parse_block()?;
 
-        Ok(ParserNode::If(
-            Box::new(cond),
-            Box::new(body)
-        ))
+        let mut else_ifs = Vec::new();
+        let mut else_body = None;
+
+        while self.tokens.peek() == Some(&Token::Else) {
+            self.tokens.next(); // consume the else
+
+            if self.tokens.peek() == Some(&Token::If) {
+                self.tokens.next(); // consume the if
+                let cond = self.parse_expression()?;
+                let body = self.parse_block()?;
+
+                else_ifs.push((cond, body));
+            } else {
+                else_body = Some(self.parse_block()?);
+                break;
+            }
+        }
+
+        Ok(ParserNode::If {
+            cond: Box::new(cond),
+            body: Box::new(body),
+            else_ifs,
+            else_body: else_body.map(Box::new),
+        })
     }
 
     fn parse_expression_statement(&mut self) -> ParseResult {

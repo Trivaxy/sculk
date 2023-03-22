@@ -68,6 +68,9 @@ pub enum Token {
     #[token("if")]
     If,
 
+    #[token("else", priority = 20)]
+    Else,
+
     #[regex(r"true|false", |tok| tok.slice().parse())]
     Bool(bool),
 
