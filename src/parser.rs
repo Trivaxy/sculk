@@ -44,7 +44,7 @@ pub enum ParserNode {
     FunctionDeclaration {
         name: String,
         args: Vec<ParserNode>,
-        return_ty: Option<Box<ParserNode>>,
+        return_ty: SculkType,
         body: Box<ParserNode>,
     },
     Return(Box<ParserNode>),
@@ -118,24 +118,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<ParserOutput, &[ParseError]> {
+    pub fn parse(mut self) -> ParserOutput {
         let mut functions = Vec::new();
 
         while self.tokens.peek().is_some() {
             match self.parse_func_declaration() {
                 Ok(stmt) => functions.push(stmt),
-                Err(_) => break, // error already logged and handled, we just need to break
+                Err(_) => break, // error already logged, continue parsing
             };
         }
 
-        if !self.errors.is_empty() {
-            return Err(&self.errors);
-        }
-
-        Ok(ParserOutput::new(
-            ParserNode::Program(functions),
-            std::mem::replace(&mut self.func_defs, HashMap::new()),
-        ))
+        ParserOutput::new(ParserNode::Program(functions), self.func_defs, self.errors)
     }
 
     fn parse_block(&mut self) -> ParseResult {
@@ -215,9 +208,9 @@ impl<'a> Parser<'a> {
             Some(Token::Arrow) => {
                 self.tokens.next(); // consume the arrow
                 let return_ty = self.parse_identifier()?;
-                Some(Box::new(return_ty))
+                str_to_type(return_ty.as_identifier())
             }
-            _ => None,
+            _ => SculkType::None,
         };
 
         let body = self.parse_block()?;
@@ -495,12 +488,7 @@ impl<'a> Parser<'a> {
         expect_tok!(self, Token::Colon, "expected :");
 
         let ty = match self.tokens.next() {
-            Some(Token::Identifier(name)) => match name.as_str() {
-                "int" => SculkType::Integer,
-                "selector" => SculkType::Selector,
-                "bool" => SculkType::Bool,
-                _ => SculkType::Struct(name.clone()),
-            },
+            Some(Token::Identifier(name)) => str_to_type(name),
             _ => return self.error("expected valid type"),
         };
 
@@ -533,14 +521,32 @@ impl<'a> Parser<'a> {
     }
 }
 
+fn str_to_type(name: &str) -> SculkType {
+    match name {
+        "int" => SculkType::Integer,
+        "bool" => SculkType::Bool,
+        "selector" => SculkType::Selector,
+        _ => SculkType::Struct(name.to_string())
+    }
+}
+
 pub struct ParserOutput {
     pub ast: ParserNode,
     pub func_defs: HashMap<String, FunctionDefinition>,
+    pub errs: Vec<ParseError>,
 }
 
 impl ParserOutput {
-    fn new(ast: ParserNode, func_defs: HashMap<String, FunctionDefinition>) -> Self {
-        Self { ast, func_defs }
+    fn new(
+        ast: ParserNode,
+        func_defs: HashMap<String, FunctionDefinition>,
+        errs: Vec<ParseError>,
+    ) -> Self {
+        Self {
+            ast,
+            func_defs,
+            errs,
+        }
     }
 }
 

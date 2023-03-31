@@ -8,10 +8,13 @@ use std::{
 
 use crate::{
     data::{ResourceLocation, ScoreboardVariable},
-    parser::{FunctionDefinition, Operation, ParseError, Parser, ParserNode},
+    parser::{FunctionDefinition, Operation, ParseError, Parser, ParserNode}, types::SculkType,
 };
 
-use super::rebranch;
+use super::{
+    rebranch,
+    validate::{ValidationError, Validator},
+};
 
 pub struct CodeGenerator {
     unfinished_functions: Vec<Function>,
@@ -26,54 +29,68 @@ pub struct CodeGenerator {
 
 impl CodeGenerator {
     pub fn compile_src(src: &str, namespace: &str) -> Result<Self, Vec<CompileError>> {
-        let mut parser = Parser::new(src);
+        let parser = Parser::new(src);
+        let mut errors = Vec::new();
 
-        match parser.parse() {
-            Ok(mut parse_output) => {
-                rebranch::rebranch(&mut parse_output.ast);
+        let mut parse_output = parser.parse();
 
-                let mut sculk_main = Function::new_empty(
-                    "_sculkmain".to_string(),
-                    ResourceLocation::new(namespace.to_string(), "_sculkmain".to_string()),
-                    vec![],
-                    None,
-                );
+        let validator = Validator::new();
+        let validation_errs = validator.validate_program(&parse_output.ast);
 
-                let mut gen = Self {
-                    unfinished_functions: vec![],
-                    ready_functions: HashMap::new(),
-                    func_defs: parse_output.func_defs,
-                    eval_stacks: vec![],
-                    bin_op_depth: 0,
-                    anon_func_depth: 0,
-                    flag_tmp_count: 0,
-                    namespace: namespace.to_string(),
-                };
-
-                gen.compile(&parse_output.ast);
-
-                for func in gen.ready_functions.values().filter(|func| !func.anonymous) {
-                    sculk_main.actions.push(Action::CreateStorage {
-                        name: ResourceLocation::new(namespace.to_string(), func.name.clone())
-                            .as_scoreboard(),
-                    });
-                }
-
-                sculk_main.actions.push(Action::CallFunction {
-                    target: ResourceLocation::new(namespace.to_string(), "main".to_string()),
-                });
-
-                gen.ready_functions
-                    .insert("_sculkmain".to_string(), sculk_main);
-
-                Ok(gen)
-            }
-            Err(_) => Err(parser
-                .errors()
+        errors.extend(
+            parse_output
+                .errs
                 .into_iter()
-                .map(|err| CompileError::parse_error(err.clone()))
-                .collect()),
+                .map(|err| CompileError::Parse(err)),
+        );
+
+        errors.extend(
+            validation_errs
+                .into_iter()
+                .map(|err| CompileError::Validate(err)),
+        );
+
+        if errors.len() > 0 {
+            return Err(errors);
         }
+
+        rebranch::rebranch(&mut parse_output.ast);
+
+        let mut sculk_main = Function::new_empty(
+            "_sculkmain".to_string(),
+            ResourceLocation::new(namespace.to_string(), "_sculkmain".to_string()),
+            vec![],
+            SculkType::None,
+        );
+
+        let mut gen = Self {
+            unfinished_functions: vec![],
+            ready_functions: HashMap::new(),
+            func_defs: parse_output.func_defs,
+            eval_stacks: vec![],
+            bin_op_depth: 0,
+            anon_func_depth: 0,
+            flag_tmp_count: 0,
+            namespace: namespace.to_string(),
+        };
+
+        gen.compile(&parse_output.ast);
+
+        for func in gen.ready_functions.values().filter(|func| !func.anonymous) {
+            sculk_main.actions.push(Action::CreateStorage {
+                name: ResourceLocation::new(namespace.to_string(), func.name.clone())
+                    .as_scoreboard(),
+            });
+        }
+
+        sculk_main.actions.push(Action::CallFunction {
+            target: ResourceLocation::new(namespace.to_string(), "main".to_string()),
+        });
+
+        gen.ready_functions
+            .insert("_sculkmain".to_string(), sculk_main);
+
+        Ok(gen)
     }
 
     // TODO: no more unwraps here
@@ -202,7 +219,7 @@ impl CodeGenerator {
         &mut self,
         name: &str,
         args: &[ParserNode],
-        return_ty: &Option<Box<ParserNode>>,
+        return_ty: &SculkType,
         body: &ParserNode,
     ) {
         self.unfinished_functions.push(Function::new_empty(
@@ -211,12 +228,10 @@ impl CodeGenerator {
             args.iter()
                 .map(|node| node.as_identifier().to_string())
                 .collect(),
-            return_ty
-                .as_ref()
-                .map(|node| node.as_identifier().to_string()),
+            return_ty.clone()
         ));
 
-        if return_ty.is_some() {
+        if !return_ty.is_none() {
             self.emit_action(Action::SetVariableToNumber {
                 var: self.local_variable("_RETFLAG"),
                 val: 0,
@@ -225,7 +240,8 @@ impl CodeGenerator {
 
         self.visit_node(body);
 
-        self.ready_functions.insert(name.to_string(), self.unfinished_functions.pop().unwrap());
+        self.ready_functions
+            .insert(name.to_string(), self.unfinished_functions.pop().unwrap());
         self.flag_tmp_count = 0;
     }
 
@@ -255,7 +271,10 @@ impl CodeGenerator {
 
         self.emit_action(Action::ExecuteIf {
             condition: format!("score {} matches 0", self.local_variable("_RETFLAG")),
-            then: Box::new(Action::SetVariableToNumber { var: self.local_variable("_RETFLAG"), val: 1 })
+            then: Box::new(Action::SetVariableToNumber {
+                var: self.local_variable("_RETFLAG"),
+                val: 1,
+            }),
         });
     }
 
@@ -463,7 +482,7 @@ struct Function {
     scoreboard: ResourceLocation,
     args: HashMap<String, usize>,
     idx_to_arg: HashMap<usize, String>,
-    return_ty: Option<String>, // TODO: convert to Option<SculkType>
+    return_ty: SculkType,
     actions: Vec<Action>,
     anonymous: bool,
 }
@@ -475,7 +494,7 @@ impl Function {
         name: String,
         scoreboard: ResourceLocation,
         args: Vec<String>,
-        return_ty: Option<String>,
+        return_ty: SculkType,
     ) -> Self {
         Function {
             name,
@@ -501,7 +520,7 @@ impl Function {
         scoreboard: ResourceLocation,
         args: HashMap<String, usize>,
         idx_to_arg: HashMap<usize, String>,
-        return_ty: Option<String>,
+        return_ty: SculkType,
     ) -> Self {
         Function {
             name,
@@ -516,10 +535,7 @@ impl Function {
 
     fn make_anonymous_child(&self) -> Self {
         let mut func = Function::new_empty_mapped_args(
-            format!(
-                "anon_{}",
-                ANONYMOUS_FUNC_COUNT.load(Ordering::Relaxed)
-            ),
+            format!("anon_{}", ANONYMOUS_FUNC_COUNT.load(Ordering::Relaxed)),
             self.scoreboard.clone(),
             self.args.clone(),
             self.idx_to_arg.clone(),
@@ -534,6 +550,7 @@ impl Function {
 #[derive(Debug)]
 pub enum CompileError {
     Parse(ParseError),
+    Validate(ValidationError),
     InvalidTypes,
 }
 
