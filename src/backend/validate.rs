@@ -165,14 +165,12 @@ impl Validator {
                             return SculkType::Unknown;
                         }
                     };
-
-                    let mut arg_errs = Vec::new();
-
+                    
                     for (arg, expected_type) in args.iter().zip(func.args.iter()) {
                         let arg_type = self.visit_node(arg);
 
                         if arg_type != *expected_type {
-                            arg_errs.push(ValidationError::FunctionCallArgTypeMismatch {
+                            self.error(ValidationError::FunctionCallArgTypeMismatch {
                                 name: name.clone(),
                                 expected: expected_type.clone(),
                                 actual: arg_type.clone(),
