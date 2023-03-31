@@ -88,7 +88,7 @@ impl Validator {
                 if cond_type != SculkType::Bool {
                     self.error(ValidationError::ExpectedBoolInIf(cond_type));
                 }
-                
+
                 self.push_scope();
                 self.visit_node(body);
                 self.pop_scope();
@@ -191,7 +191,10 @@ impl Validator {
                 let rhs_type = self.visit_node(rhs);
 
                 match op {
-                    Operation::GreaterThan | Operation::LessThan | Operation::GreaterThanOrEquals | Operation::LessThanOrEquals => {
+                    Operation::GreaterThan
+                    | Operation::LessThan
+                    | Operation::GreaterThanOrEquals
+                    | Operation::LessThanOrEquals => {
                         if lhs_type != SculkType::Integer || rhs_type != SculkType::Integer {
                             self.error(ValidationError::ConditionalOperatorTypeMismatch {
                                 lhs: lhs_type.clone(),
@@ -215,6 +218,7 @@ impl Validator {
                 lhs_type.clone()
             }
             ParserNode::Unary(expr, _) => self.visit_node(expr),
+            ParserNode::ReturnSafe(_) => unreachable!() // does not exist at this stage
         }
     }
 

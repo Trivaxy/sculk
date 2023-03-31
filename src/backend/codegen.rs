@@ -8,7 +8,8 @@ use std::{
 
 use crate::{
     data::{ResourceLocation, ScoreboardVariable},
-    parser::{FunctionDefinition, Operation, ParseError, Parser, ParserNode}, types::SculkType,
+    parser::{FunctionDefinition, Operation, ParseError, Parser, ParserNode},
+    types::SculkType,
 };
 
 use super::{
@@ -56,6 +57,8 @@ impl CodeGenerator {
 
         rebranch::rebranch(&mut parse_output.ast);
 
+        dbg!(&mut parse_output.ast);
+        
         let mut sculk_main = Function::new_empty(
             "_sculkmain".to_string(),
             ResourceLocation::new(namespace.to_string(), "_sculkmain".to_string()),
@@ -147,6 +150,9 @@ impl CodeGenerator {
                 else_ifs,
                 else_body,
             } => self.visit_if(cond, body, else_ifs, else_body),
+            ParserNode::ReturnSafe(expr) => {
+                self.visit_node(expr);
+            }
         }
     }
 
@@ -228,7 +234,7 @@ impl CodeGenerator {
             args.iter()
                 .map(|node| node.as_identifier().to_string())
                 .collect(),
-            return_ty.clone()
+            return_ty.clone(),
         ));
 
         if !return_ty.is_none() {
@@ -274,6 +280,23 @@ impl CodeGenerator {
             then: Box::new(Action::SetVariableToNumber {
                 var: self.local_variable("_RETFLAG"),
                 val: 1,
+            }),
+        });
+    }
+
+    fn visit_return_safe(&mut self, expr: &ParserNode) {
+        let not_ret_func = self.current_function().make_anonymous_child();
+        let not_ret_func_name = not_ret_func.name.clone();
+
+        self.unfinished_functions.push(not_ret_func);
+        self.visit_node(expr);
+        self.ready_functions
+            .insert(not_ret_func_name.clone(), self.unfinished_functions.pop().unwrap());
+
+        self.emit_action(Action::ExecuteUnless {
+            condition: format!("score {} matches 1", self.local_variable("_RETFLAG")),
+            then: Box::new(Action::CallFunction {
+                target: self.resource_location(&not_ret_func_name),
             }),
         });
     }
