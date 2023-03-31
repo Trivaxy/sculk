@@ -1,6 +1,6 @@
-use std::{collections::HashMap, iter::Peekable};
+use std::{collections::HashMap};
 
-use logos::{Lexer, Logos};
+
 
 use crate::{
     lexer::{Token, TokenStream},
@@ -40,6 +40,10 @@ pub enum ParserNode {
         name: String,
         expr: Box<ParserNode>,
         ty: Option<SculkType>,
+    },
+    VariableAssignment {
+        name: String,
+        expr: Box<ParserNode>,
     },
     FunctionDeclaration {
         name: String,
@@ -153,7 +157,16 @@ impl<'a> Parser<'a> {
             Some(Token::If) => self.parse_if(),
             Some(Token::LeftBrace) => self.parse_block(),
             Some(Token::Return) => self.parse_return_statement(),
-            _ => self.parse_expression_statement(), // TODO: maybe this should just become exclusive to function calls
+            Some(Token::Identifier(_)) => {
+                let ident = self.parse_identifier()?.as_identifier().to_string();
+
+                if self.tokens.peek() == Some(&Token::LeftParens) {
+                    self.parse_func_call(ident)
+                } else {
+                    self.parse_var_assignment(ident)
+                }
+            },
+            _ => self.error("expected statement"),
         }
     }
 
@@ -181,6 +194,19 @@ impl<'a> Parser<'a> {
             }),
             _ => self.error("expected identifier"),
         }
+    }
+
+    fn parse_var_assignment(&mut self, name: String) -> ParseResult {
+        expect_tok!(self, Token::Equals, "expected =");
+
+        let expr = self.parse_expression()?;
+
+        expect_tok!(self, Token::Semicolon, "expected ;");
+
+        Ok(ParserNode::VariableAssignment {
+            name,
+            expr: Box::new(expr),
+        })
     }
 
     fn parse_func_declaration(&mut self) -> ParseResult {
@@ -459,7 +485,7 @@ impl<'a> Parser<'a> {
     fn parse_factor(&mut self) -> ParseResult {
         let mut expr = self.parse_unary()?;
 
-        while (self.tokens.peek().is_some()) {
+        while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
                 Token::Multiply => Operation::Multiply,
                 Token::Divide => Operation::Divide,

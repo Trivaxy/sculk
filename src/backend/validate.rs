@@ -1,4 +1,4 @@
-use std::{cell::Cell, collections::HashMap, rc::Rc};
+use std::{cell::Cell, collections::HashMap};
 
 use crate::{
     parser::{Operation, ParserNode},
@@ -130,7 +130,7 @@ impl Validator {
 
                 if let Some(specified_type) = specified_type {
                     if *specified_type != expr_type {
-                        self.error(ValidationError::VariableDeclarationTypeMismatch {
+                        self.error(ValidationError::VariableAssignmentTypeMismatch {
                             name: name.clone(),
                             expected: specified_type.clone(),
                             actual: expr_type.clone(),
@@ -139,6 +139,26 @@ impl Validator {
                 }
 
                 self.register_variable(name.clone(), expr_type.clone());
+
+                SculkType::None
+            }
+            ParserNode::VariableAssignment { name, expr } => {
+                let expr_type = self.visit_node(expr);
+
+                match self.find_variable_type(name) {
+                    Some(ty) => {
+                        if *ty != expr_type {
+                            self.error(ValidationError::VariableAssignmentTypeMismatch {
+                                name: name.clone(),
+                                expected: ty.clone(),
+                                actual: expr_type.clone(),
+                            });
+                        }
+                    }
+                    None => {
+                        self.error(ValidationError::UnknownVariable(name.clone()));
+                    }
+                }
 
                 SculkType::None
             }
@@ -165,7 +185,7 @@ impl Validator {
                             return SculkType::Unknown;
                         }
                     };
-                    
+
                     for (arg, expected_type) in args.iter().zip(func.args.iter()) {
                         let arg_type = self.visit_node(arg);
 
@@ -256,7 +276,7 @@ pub enum ValidationError {
     ExpectedBoolInIf(SculkType),
     UnknownVariable(String),
     UnknownFunction(String),
-    VariableDeclarationTypeMismatch {
+    VariableAssignmentTypeMismatch {
         name: String,
         expected: SculkType,
         actual: SculkType,

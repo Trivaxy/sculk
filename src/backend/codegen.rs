@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
-    fmt::{format, Display, Formatter},
+    collections::{HashMap},
     io::Write,
     path::Path,
     sync::atomic::{AtomicI32, Ordering},
@@ -127,7 +126,10 @@ impl CodeGenerator {
             ParserNode::Identifier(name) => self.visit_identifier(name),
             ParserNode::Operation(lhs, rhs, op) => self.visit_binary_operation(lhs, rhs, *op),
             ParserNode::VariableDeclaration { name, expr, ty: _ } => {
-                self.visit_variable_declaration(name, expr)
+                self.visit_variable_assignment(name, expr)
+            }
+            ParserNode::VariableAssignment { name, expr } => {
+                self.visit_variable_assignment(name, expr)
             }
             ParserNode::Program(nodes) => self.visit_program(nodes),
             ParserNode::FunctionDeclaration {
@@ -139,7 +141,7 @@ impl CodeGenerator {
             ParserNode::FunctionCall { name, args } => self.visit_function_call(name, args),
             ParserNode::Return(expr) => self.visit_return(expr),
             ParserNode::Block(nodes) => self.visit_block(nodes),
-            ParserNode::SelectorLiteral(selector) => todo!(),
+            ParserNode::SelectorLiteral(_selector) => todo!(),
             ParserNode::TypedIdentifier { .. } => {}
             ParserNode::Unary(expr, op) => self.visit_unary(expr, *op),
             ParserNode::If {
@@ -207,7 +209,7 @@ impl CodeGenerator {
         }
     }
 
-    fn visit_variable_declaration(&mut self, name: &str, val: &ParserNode) {
+    fn visit_variable_assignment(&mut self, name: &str, val: &ParserNode) {
         self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
         self.visit_node(val);
         let result_tmp = self.end_current_evaluation();
