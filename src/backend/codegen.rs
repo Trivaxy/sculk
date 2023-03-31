@@ -250,6 +250,12 @@ impl CodeGenerator {
     }
 
     fn visit_function_call(&mut self, name: &str, args: &[ParserNode]) {
+        let use_new_stack = self.eval_stacks.is_empty();
+
+        if use_new_stack {
+            self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
+        }
+
         for arg in args.iter() {
             self.visit_node(arg);
         }
@@ -258,6 +264,10 @@ impl CodeGenerator {
             self.resource_location(name),
             self.func_defs[name].args.clone(),
         ));
+
+        if use_new_stack {
+            self.end_current_evaluation();
+        }
     }
 
     fn visit_return(&mut self, expr: &ParserNode) {
