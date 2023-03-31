@@ -57,8 +57,6 @@ impl CodeGenerator {
 
         rebranch::rebranch(&mut parse_output.ast);
 
-        dbg!(&mut parse_output.ast);
-        
         let mut sculk_main = Function::new_empty(
             "_sculkmain".to_string(),
             ResourceLocation::new(namespace.to_string(), "_sculkmain".to_string()),
@@ -151,7 +149,7 @@ impl CodeGenerator {
                 else_body,
             } => self.visit_if(cond, body, else_ifs, else_body),
             ParserNode::ReturnSafe(expr) => {
-                self.visit_node(expr);
+                self.visit_return_safe(expr);
             }
         }
     }
