@@ -233,7 +233,37 @@ impl Validator {
                     });
                 }
 
+                if lhs_type != SculkType::Integer {
+                    self.error(ValidationError::ArithmeticUnsupported { ty: lhs_type.clone() })
+                }
+
+                if rhs_type != SculkType::Integer {
+                    self.error(ValidationError::ArithmeticUnsupported { ty: rhs_type.clone() })
+                }
+
                 lhs_type.clone()
+            }
+            ParserNode::OpEquals { name, expr, .. } => {
+                let expr_type = self.visit_node(expr);
+
+                if expr_type != SculkType::Integer {
+                    self.error(ValidationError::ArithmeticUnsupported { ty: expr_type.clone() })
+                }
+
+                match self.find_variable_type(name) {
+                    Some(ty) => {
+                        let ty = ty.clone();
+
+                        if ty != SculkType::Integer{
+                            self.error(ValidationError::ArithmeticUnsupported { ty: ty.clone() })
+                        }
+                    }
+                    None => {
+                        self.error(ValidationError::UnknownVariable(name.clone()));
+                    }
+                }
+
+                SculkType::None
             }
             ParserNode::Unary(expr, _) => self.visit_node(expr),
             ParserNode::ReturnSafe(_) => unreachable!() // does not exist at this stage
@@ -298,6 +328,9 @@ pub enum ValidationError {
     ConditionalOperatorTypeMismatch {
         lhs: SculkType,
         rhs: SculkType,
+    },
+    ArithmeticUnsupported {
+        ty: SculkType,
     },
 }
 

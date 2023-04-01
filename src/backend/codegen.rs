@@ -125,6 +125,7 @@ impl CodeGenerator {
             ParserNode::BoolLiteral(bool) => self.visit_bool(*bool),
             ParserNode::Identifier(name) => self.visit_identifier(name),
             ParserNode::Operation(lhs, rhs, op) => self.visit_binary_operation(lhs, rhs, *op),
+            ParserNode::OpEquals { name, expr, op } => self.visit_op_equals(name, expr, *op),
             ParserNode::VariableDeclaration { name, expr, ty: _ } => {
                 self.visit_variable_assignment(name, expr)
             }
@@ -191,6 +192,46 @@ impl CodeGenerator {
         self.push_eval_instr(EvaluationInstruction::Operation(op));
 
         self.bin_op_depth -= 1;
+    }
+
+    fn visit_op_equals(&mut self, name: &str, expr: &ParserNode, op: Operation) {
+        self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
+        self.visit_node(expr);
+        let result_tmp = self.end_current_evaluation();
+
+        match op {
+            Operation::Add => {
+                self.emit_action(Action::AddVariables {
+                    first: self.local_variable(name),
+                    second: self.get_tmp(result_tmp),
+                });
+            }
+            Operation::Subtract => {
+                self.emit_action(Action::SubtractVariables {
+                    first: self.local_variable(name),
+                    second: self.get_tmp(result_tmp),
+                });
+            }
+            Operation::Multiply => {
+                self.emit_action(Action::MultiplyVariables {
+                    first: self.local_variable(name),
+                    second: self.get_tmp(result_tmp),
+                });
+            }
+            Operation::Divide => {
+                self.emit_action(Action::DivideVariables {
+                    first: self.local_variable(name),
+                    second: self.get_tmp(result_tmp),
+                });
+            }
+            Operation::Modulo => {
+                self.emit_action(Action::ModuloVariables {
+                    first: self.local_variable(name),
+                    second: self.get_tmp(result_tmp),
+                });
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn visit_unary(&mut self, expr: &ParserNode, op: Operation) {

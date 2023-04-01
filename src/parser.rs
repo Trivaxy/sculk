@@ -57,6 +57,11 @@ pub enum ParserNode {
         args: Vec<ParserNode>,
     },
     Operation(Box<ParserNode>, Box<ParserNode>, Operation),
+    OpEquals {
+        name: String,
+        expr: Box<ParserNode>,
+        op: Operation,
+    },
     Unary(Box<ParserNode>, Operation),
     If {
         // see rebranch::rebranch
@@ -160,10 +165,13 @@ impl<'a> Parser<'a> {
             Some(Token::Identifier(_)) => {
                 let ident = self.parse_identifier()?.as_identifier().to_string();
 
-                if self.tokens.peek() == Some(&Token::LeftParens) {
-                    self.parse_func_call(ident)
-                } else {
-                    self.parse_var_assignment(ident)
+                match self.tokens.peek() {
+                    Some(Token::Equals) => self.parse_var_assignment(ident),
+                    Some(Token::LeftParens) => self.parse_func_call(ident),
+                    Some(Token::AddEquals) | Some(Token::SubtractEquals) | Some(Token::MultiplyEquals) | Some(Token::DivideEquals) | Some(Token::ModuloEquals) => {
+                        self.parse_op_equals(ident)
+                    }
+                    _ => self.error("expected statement"),
                 }
             },
             _ => self.error("expected statement"),
@@ -500,6 +508,23 @@ impl<'a> Parser<'a> {
         }
 
         Ok(expr)
+    }
+
+    fn parse_op_equals(&mut self, name: String) -> ParseResult {
+        let op = match self.tokens.next() {
+            Some(Token::AddEquals) => Operation::Add,
+            Some(Token::SubtractEquals) => Operation::Subtract,
+            Some(Token::MultiplyEquals) => Operation::Multiply,
+            Some(Token::DivideEquals) => Operation::Divide,
+            Some(Token::ModuloEquals) => Operation::Modulo,
+            _ => unreachable!(),
+        };
+
+        let expr = self.parse_expression()?;
+
+        expect_tok!(self, Token::Semicolon, "expected ; after expression");
+
+        Ok(ParserNode::OpEquals { name, expr: Box::new(expr), op })
     }
 
     fn parse_typed_identifier(&mut self, ty_optional: bool) -> ParseResult {

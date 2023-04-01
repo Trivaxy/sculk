@@ -41,6 +41,21 @@ pub enum Token {
     #[token("!")]
     Not,
 
+    #[token("+=")]
+    AddEquals,
+
+    #[token("-=")]
+    SubtractEquals,
+
+    #[token("*=")]
+    MultiplyEquals,
+
+    #[token("/=")]
+    DivideEquals,
+
+    #[token("%=")]
+    ModuloEquals,
+
     #[token("(")]
     LeftParens,
 
