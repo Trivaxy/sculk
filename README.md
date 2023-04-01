@@ -15,6 +15,7 @@ Sculk is a scripting language designed to abstract away all the awkwardness and 
 - [x] Variables
 - [x] Control Flow
 - [x] Functions
+- [ ] Inline Command Literals
 - [ ] Recursion
 - [ ] Loops
 - [ ] Fixed floating point numbers
