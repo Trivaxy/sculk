@@ -1,20 +1,20 @@
 use std::path::Path;
 
-use crate::codegen::CodeGenerator;
+use crate::backend::codegen::CodeGenerator;
 
+mod backend;
+mod data;
 mod lexer;
 mod parser;
-mod codegen;
 mod types;
 
 fn main() {
-    let test = "fn determinant(a: int, b: int, c: int) -> int {
-        return b * b - 4 * a * c;
-    }
-    
-    fn main() {
-        determinant(4, 1, 2);
-    }
+    let test = "
+        fn g() {
+            let x = 10;
+            x = 0;
+            x += x * 2;
+        }
     ";
 
     let codegen = CodeGenerator::compile_src(test, "test");
@@ -22,7 +22,7 @@ fn main() {
     match codegen {
         Ok(gen) => {
             gen.output_to_dir(Path::new("output"));
-        },
-        Err(errs) => println!("{:?}", errs)
+        }
+        Err(errs) => println!("{:#?}", errs),
     };
 }
