@@ -6,19 +6,19 @@ pub enum Token {
     Number(i32),
 
     #[token("+")]
-    Add,
+    Plus,
 
     #[token("-")]
-    Subtract,
+    Hyphen,
 
     #[token("*")]
-    Multiply,
+    Asterisk,
 
     #[token("/")]
-    Divide,
+    Slash,
 
     #[token("%")]
-    Modulo,
+    Percent,
 
     #[token(">")]
     GreaterThan,

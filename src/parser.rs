@@ -416,7 +416,7 @@ impl<'a> Parser<'a> {
 
     fn parse_unary(&mut self) -> ParseResult {
         let op = match self.tokens.peek() {
-            Some(Token::Subtract) => Operation::Negate,
+            Some(Token::Hyphen) => Operation::Negate,
             Some(Token::Not) => Operation::Not,
             _ => return self.parse_primary(),
         };
@@ -476,8 +476,8 @@ impl<'a> Parser<'a> {
 
         while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
-                Token::Add => Operation::Add,
-                Token::Subtract => Operation::Subtract,
+                Token::Plus => Operation::Add,
+                Token::Hyphen => Operation::Subtract,
                 _ => break,
             };
 
@@ -495,9 +495,9 @@ impl<'a> Parser<'a> {
 
         while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
-                Token::Multiply => Operation::Multiply,
-                Token::Divide => Operation::Divide,
-                Token::Modulo => Operation::Modulo,
+                Token::Asterisk => Operation::Multiply,
+                Token::Slash => Operation::Divide,
+                Token::Percent => Operation::Modulo,
                 _ => break,
             };
 
