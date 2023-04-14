@@ -157,7 +157,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_statement(&mut self) -> ParseResult {
-        match dbg!(self.tokens.peek()) {
+        match self.tokens.peek() {
             Some(Token::Let) => self.parse_var_declaration(),
             Some(Token::Fn) => self.parse_func_declaration(),
             Some(Token::If) => self.parse_if(),
