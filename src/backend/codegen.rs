@@ -843,7 +843,7 @@ impl EvaluationStack {
                     for i in 0..args.len() {
                         let arg_tmp = self.get_tmp(arg_tmps[i]);
                         self.emit_action(Action::SetVariableToVariable {
-                            first: ScoreboardEntry::new(func.clone(), args[i].clone()),
+                            first: ScoreboardEntry::new(func.with_separator('.'), args[i].clone()),
                             second: arg_tmp,
                         });
                     }
@@ -859,7 +859,7 @@ impl EvaluationStack {
                     let ret_tmp = self.reserve_available_tmp();
                     self.emit_action(Action::SetVariableToVariable {
                         first: self.get_tmp(ret_tmp),
-                        second: ScoreboardEntry::new(func.clone(), "RET".to_string()),
+                        second: ScoreboardEntry::new(func.with_separator('.'), "RET".to_string()),
                     });
                     intermediate_tmps.push(ret_tmp);
                 }
