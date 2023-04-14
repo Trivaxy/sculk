@@ -78,8 +78,7 @@ impl CodeGenerator {
 
         for func in gen.ready_functions.values().filter(|func| !func.anonymous) {
             sculk_main.actions.push(Action::CreateStorage {
-                name: ResourceLocation::new(namespace.to_string(), func.name.clone())
-                    .as_scoreboard(),
+                name: ResourceLocation::scoreboard(namespace.to_string(), func.name.clone()).to_string()
             });
         }
 
@@ -272,7 +271,7 @@ impl CodeGenerator {
     ) {
         self.unfinished_functions.push(Function::new_empty(
             name.to_string(),
-            self.resource_location(name),
+            self.scoreboard(name),
             args.iter()
                 .map(|node| node.as_identifier().to_string())
                 .collect(),
@@ -504,6 +503,10 @@ impl CodeGenerator {
 
     fn resource_location(&self, path: &str) -> ResourceLocation {
         ResourceLocation::new(self.namespace.clone(), path.to_string())
+    }
+
+    fn scoreboard(&self, name: &str) -> ResourceLocation {
+        ResourceLocation::scoreboard(self.namespace.clone(), name.to_string())
     }
 
     fn local_variable(&self, name: &str) -> ScoreboardVariable {
