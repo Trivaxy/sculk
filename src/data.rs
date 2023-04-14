@@ -14,7 +14,7 @@ impl ScoreboardVariable {
 
 impl Display for ScoreboardVariable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.name, self.scoreboard.as_scoreboard())
+        write!(f, "{} {}", self.name, self.scoreboard)
     }
 }
 
@@ -22,20 +22,21 @@ impl Display for ScoreboardVariable {
 pub struct ResourceLocation {
     pub namespace: String,
     pub path: String,
+    pub separator: char,
 }
 
 impl ResourceLocation {
     pub fn new(namespace: String, path: String) -> Self {
-        Self { namespace, path }
+        Self { namespace, path, separator: ':' }
     }
 
-    pub fn as_scoreboard(&self) -> String {
-        format!("{}_{}", self.namespace, self.path)
+    pub fn scoreboard(namespace: String, path: String) -> Self {
+        Self { namespace, path, separator: '.' }
     }
 }
 
 impl Display for ResourceLocation {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.namespace, self.path)
+        write!(f, "{}{}{}", self.namespace, self.separator, self.path)
     }
 }
