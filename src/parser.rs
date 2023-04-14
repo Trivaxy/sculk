@@ -157,7 +157,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_statement(&mut self) -> ParseResult {
-        match self.tokens.peek() {
+        match dbg!(self.tokens.peek()) {
             Some(Token::Let) => self.parse_var_declaration(),
             Some(Token::Fn) => self.parse_func_declaration(),
             Some(Token::If) => self.parse_if(),
@@ -168,7 +168,11 @@ impl<'a> Parser<'a> {
 
                 match self.tokens.peek() {
                     Some(Token::Equals) => self.parse_var_assignment(ident),
-                    Some(Token::LeftParens) => self.parse_func_call(ident),
+                    Some(Token::LeftParens) => {
+                        let node = self.parse_func_call(ident);
+                        expect_tok!(self, Token::Semicolon, "expected ;");
+                        node
+                    }
                     Some(Token::AddEquals) | Some(Token::SubtractEquals) | Some(Token::MultiplyEquals) | Some(Token::DivideEquals) | Some(Token::ModuloEquals) => {
                         self.parse_op_equals(ident)
                     }
@@ -565,7 +569,7 @@ impl<'a> Parser<'a> {
         if !valid {
             return self.error("expected ; after command literal");
         }
-        
+
         let literal = remainder[..end].to_string();
         self.tokens.bump(end + 1);
 
