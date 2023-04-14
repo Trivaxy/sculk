@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    data::{ResourceLocation, ScoreboardVariable},
+    data::{ResourceLocation, ScoreboardEntry},
     parser::{FunctionDefinition, Operation, ParseError, Parser, ParserNode},
     types::SculkType,
 };
@@ -280,7 +280,7 @@ impl CodeGenerator {
 
         if !return_ty.is_none() {
             self.emit_action(Action::SetVariableToNumber {
-                var: self.local_variable("_RETFLAG"),
+                var: self.local_variable("RETFLAG"),
                 val: 0,
             });
         }
@@ -319,17 +319,17 @@ impl CodeGenerator {
         let result_tmp = self.end_current_evaluation();
 
         self.emit_action(Action::ExecuteIf {
-            condition: format!("score {} matches 0", self.local_variable("_RETFLAG")),
+            condition: format!("score {} matches 0", self.local_variable("RETFLAG")),
             then: Box::new(Action::SetVariableToVariable {
-                first: self.local_variable("_RET"),
+                first: self.local_variable("RET"),
                 second: self.get_tmp(result_tmp),
             }),
         });
 
         self.emit_action(Action::ExecuteIf {
-            condition: format!("score {} matches 0", self.local_variable("_RETFLAG")),
+            condition: format!("score {} matches 0", self.local_variable("RETFLAG")),
             then: Box::new(Action::SetVariableToNumber {
-                var: self.local_variable("_RETFLAG"),
+                var: self.local_variable("RETFLAG"),
                 val: 1,
             }),
         });
@@ -345,7 +345,7 @@ impl CodeGenerator {
             .insert(not_ret_func_name.clone(), self.unfinished_functions.pop().unwrap());
 
         self.emit_action(Action::ExecuteUnless {
-            condition: format!("score {} matches 1", self.local_variable("_RETFLAG")),
+            condition: format!("score {} matches 1", self.local_variable("RETFLAG")),
             then: Box::new(Action::CallFunction {
                 target: self.resource_location(&not_ret_func_name),
             }),
@@ -426,12 +426,12 @@ impl CodeGenerator {
         self.eval_stacks.last_mut().unwrap().push_instruction(instr);
     }
 
-    fn get_tmp(&self, num: i32) -> ScoreboardVariable {
-        self.local_variable(&format!("_TMP{}", num))
+    fn get_tmp(&self, num: i32) -> ScoreboardEntry {
+        self.local_variable(&format!("TMP{}", num))
     }
 
-    fn get_flag(&self, num: i32) -> ScoreboardVariable {
-        self.local_variable(&format!("_FLAG{}", num))
+    fn get_flag(&self, num: i32) -> ScoreboardEntry {
+        self.local_variable(&format!("FLAG{}", num))
     }
 
     fn active_scoreboard(&self) -> ResourceLocation {
@@ -509,8 +509,8 @@ impl CodeGenerator {
         ResourceLocation::scoreboard(self.namespace.clone(), name.to_string())
     }
 
-    fn local_variable(&self, name: &str) -> ScoreboardVariable {
-        ScoreboardVariable::new(self.current_function().scoreboard.clone(), name.to_string())
+    fn local_variable(&self, name: &str) -> ScoreboardEntry {
+        ScoreboardEntry::new(self.current_function().scoreboard.clone(), name.to_string())
     }
 }
 
@@ -520,32 +520,32 @@ enum Action {
         name: String,
     },
     SetVariableToNumber {
-        var: ScoreboardVariable,
+        var: ScoreboardEntry,
         val: i32,
     },
     AddVariables {
-        first: ScoreboardVariable,
-        second: ScoreboardVariable,
+        first: ScoreboardEntry,
+        second: ScoreboardEntry,
     },
     SubtractVariables {
-        first: ScoreboardVariable,
-        second: ScoreboardVariable,
+        first: ScoreboardEntry,
+        second: ScoreboardEntry,
     },
     MultiplyVariables {
-        first: ScoreboardVariable,
-        second: ScoreboardVariable,
+        first: ScoreboardEntry,
+        second: ScoreboardEntry,
     },
     DivideVariables {
-        first: ScoreboardVariable,
-        second: ScoreboardVariable,
+        first: ScoreboardEntry,
+        second: ScoreboardEntry,
     },
     ModuloVariables {
-        first: ScoreboardVariable,
-        second: ScoreboardVariable,
+        first: ScoreboardEntry,
+        second: ScoreboardEntry,
     },
     SetVariableToVariable {
-        first: ScoreboardVariable,
-        second: ScoreboardVariable,
+        first: ScoreboardEntry,
+        second: ScoreboardEntry,
     },
     CallFunction {
         target: ResourceLocation,
@@ -650,7 +650,7 @@ impl CompileError {
 enum EvaluationInstruction {
     PushNumber(i32),
     PushBool(bool),
-    PushVariable(ScoreboardVariable),
+    PushVariable(ScoreboardEntry),
     Operation(Operation),
     CallFunction(ResourceLocation, Vec<String>),
 }
@@ -843,7 +843,7 @@ impl EvaluationStack {
                     for i in 0..args.len() {
                         let arg_tmp = self.get_tmp(arg_tmps[i]);
                         self.emit_action(Action::SetVariableToVariable {
-                            first: ScoreboardVariable::new(func.clone(), args[i].clone()),
+                            first: ScoreboardEntry::new(func.clone(), args[i].clone()),
                             second: arg_tmp,
                         });
                     }
@@ -859,7 +859,7 @@ impl EvaluationStack {
                     let ret_tmp = self.reserve_available_tmp();
                     self.emit_action(Action::SetVariableToVariable {
                         first: self.get_tmp(ret_tmp),
-                        second: ScoreboardVariable::new(func.clone(), "_RET".to_string()),
+                        second: ScoreboardEntry::new(func.clone(), "RET".to_string()),
                     });
                     intermediate_tmps.push(ret_tmp);
                 }
@@ -908,11 +908,11 @@ impl EvaluationStack {
         self.available_tmps.push(num);
     }
 
-    fn get_tmp(&self, num: i32) -> ScoreboardVariable {
-        ScoreboardVariable::new(self.scoreboard.clone(), format!("_TMP{}", num))
+    fn get_tmp(&self, num: i32) -> ScoreboardEntry {
+        ScoreboardEntry::new(self.scoreboard.clone(), format!("TMP{}", num))
     }
 
-    fn local_variable(&self, str: &str) -> ScoreboardVariable {
-        ScoreboardVariable::new(self.scoreboard.clone(), str.to_string())
+    fn local_variable(&self, str: &str) -> ScoreboardEntry {
+        ScoreboardEntry::new(self.scoreboard.clone(), str.to_string())
     }
 }
