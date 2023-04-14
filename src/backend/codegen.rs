@@ -154,6 +154,7 @@ impl CodeGenerator {
             ParserNode::ReturnSafe(expr) => {
                 self.visit_return_safe(expr);
             }
+            ParserNode::CommandLiteral(command) => self.visit_command_literal(command),
         }
     }
 
@@ -352,6 +353,10 @@ impl CodeGenerator {
         });
     }
 
+    fn visit_command_literal(&mut self, command: &str) {
+        self.emit_action(Action::Direct { command: command.to_string() });
+    }
+
     fn visit_if(
         &mut self,
         cond: &ParserNode,
@@ -493,6 +498,7 @@ impl CodeGenerator {
                 str.push_str(&format!("execute unless {} run ", condition));
                 Self::write_action(str, then);
             }
+            Action::Direct { command } => str.push_str(command),
         }
     }
 
@@ -548,6 +554,9 @@ enum Action {
     ExecuteUnless {
         condition: String,
         then: Box<Action>,
+    },
+    Direct {
+        command: String,
     },
 }
 

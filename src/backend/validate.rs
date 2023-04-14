@@ -266,6 +266,7 @@ impl Validator {
                 SculkType::None
             }
             ParserNode::Unary(expr, _) => self.visit_node(expr),
+            ParserNode::CommandLiteral(_) => SculkType::None,
             ParserNode::ReturnSafe(_) => unreachable!() // does not exist at this stage
         }
     }

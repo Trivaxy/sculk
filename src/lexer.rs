@@ -1,7 +1,7 @@
 use logos::{Lexer, Logos};
 
 #[derive(Default)]
-struct LexerExtras {
+pub struct LexerExtras {
     line: usize,
     last_line_idx: usize,
 }
@@ -136,6 +136,7 @@ pub struct TokenStream<'a> {
 impl<'a> TokenStream<'a> {
     pub fn new(src: &'a str) -> Self {
         let mut lexer = Token::lexer(src);
+
         let next = lexer.next();
         Self {
             lexer,
@@ -169,4 +170,21 @@ impl<'a> TokenStream<'a> {
     pub fn col(&self) -> usize {
         self.col
     }
+
+    pub fn remainder(&self) -> &'a str {
+        self.lexer.remainder()
+    }
+
+    pub fn bump(&mut self, n: usize) {
+        for c in self.lexer.remainder()[..n].chars() {
+            if c == '\n' {
+                self.lexer.extras.line += 1;
+                self.lexer.extras.last_line_idx = self.lexer.span().end;
+            }
+        }
+        
+        self.lexer.bump(n);
+        self.next = self.lexer.next();
+    }
+
 }
