@@ -534,6 +534,7 @@ impl<'a> Parser<'a> {
         let mut end = 0;
         let mut in_str = false;
         let mut skip = false;
+        let mut valid = false;
 
         for (i, c) in remainder.char_indices() {
             if c == '"' {
@@ -556,10 +557,15 @@ impl<'a> Parser<'a> {
 
             if !in_str && c == ';' {
                 end = i;
+                valid = true;
                 break;
             }
         }
 
+        if !valid {
+            return self.error("expected ; after command literal");
+        }
+        
         let literal = remainder[..end].to_string();
         self.tokens.bump(end + 1);
 
