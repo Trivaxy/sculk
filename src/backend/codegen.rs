@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap},
+    collections::HashMap,
     io::Write,
     path::Path,
     sync::atomic::{AtomicI32, Ordering},
@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     data::{ResourceLocation, ScoreboardEntry},
-    parser::{FunctionDefinition, Operation, ParseError, Parser, ParserNode},
+    parser::{FunctionDefinition, JumpInfo, Operation, ParseError, Parser, ParserNode},
     types::SculkType,
 };
 
@@ -24,6 +24,9 @@ pub struct CodeGenerator {
     bin_op_depth: i32,
     anon_func_depth: i32,
     flag_tmp_count: i32,
+    loop_depth: i32,
+    propagate_return: bool,
+    propagate_break: bool,
     namespace: String,
 }
 
@@ -71,6 +74,9 @@ impl CodeGenerator {
             bin_op_depth: 0,
             anon_func_depth: 0,
             flag_tmp_count: 0,
+            loop_depth: 0,
+            propagate_return: false,
+            propagate_break: false,
             namespace: namespace.to_string(),
         };
 
@@ -78,7 +84,8 @@ impl CodeGenerator {
 
         for func in gen.ready_functions.values().filter(|func| !func.anonymous) {
             sculk_main.actions.push(Action::CreateStorage {
-                name: ResourceLocation::scoreboard(namespace.to_string(), func.name.clone()).to_string()
+                name: ResourceLocation::scoreboard(namespace.to_string(), func.name.clone())
+                    .to_string(),
             });
         }
 
@@ -150,11 +157,19 @@ impl CodeGenerator {
                 else_ifs,
                 else_body,
             } => self.visit_if(cond, body, else_ifs, else_body),
-            ParserNode::ReturnSafe(expr) => {
-                self.visit_return_safe(expr);
+            ParserNode::For {
+                init,
+                cond,
+                step,
+                body,
+            } => {
+                self.visit_for(init, cond, step, body);
             }
+            ParserNode::Break => self.visit_break(),
             ParserNode::CommandLiteral(command) => self.visit_command_literal(command),
         }
+
+        self.propagate_return = false;
     }
 
     fn visit_program(&mut self, nodes: &[ParserNode]) {
@@ -318,42 +333,47 @@ impl CodeGenerator {
         self.visit_node(expr);
         let result_tmp = self.end_current_evaluation();
 
-        self.emit_action(Action::ExecuteIf {
-            condition: format!("score {} matches 0", self.local_variable("RETFLAG")),
-            then: Box::new(Action::SetVariableToVariable {
-                first: self.local_variable("RET"),
-                second: self.get_tmp(result_tmp),
-            }),
+        self.emit_action(Action::SetVariableToVariable {
+            first: self.local_variable("RET"),
+            second: self.get_tmp(result_tmp),
         });
 
-        self.emit_action(Action::ExecuteIf {
-            condition: format!("score {} matches 0", self.local_variable("RETFLAG")),
-            then: Box::new(Action::SetVariableToNumber {
-                var: self.local_variable("RETFLAG"),
-                val: 1,
-            }),
-        });
+        self.emit_action(Action::SetVariableToNumber { var: self.local_variable("RETFLAG"), val: 1 });
+        self.emit_action(Action::Return);
+
+        self.propagate_return = true;
     }
 
-    fn visit_return_safe(&mut self, expr: &ParserNode) {
+    fn visit_jump_safe(&mut self, node: &ParserNode, jump_info: JumpInfo) {
         let not_ret_func = self.current_function().make_anonymous_child();
         let not_ret_func_name = not_ret_func.name.clone();
 
         self.unfinished_functions.push(not_ret_func);
-        self.visit_node(expr);
-        self.ready_functions
-            .insert(not_ret_func_name.clone(), self.unfinished_functions.pop().unwrap());
+        self.visit_node(node);
+        self.ready_functions.insert(
+            not_ret_func_name.clone(),
+            self.unfinished_functions.pop().unwrap(),
+        );
 
-        self.emit_action(Action::ExecuteUnless {
-            condition: format!("score {} matches 1", self.local_variable("RETFLAG")),
-            then: Box::new(Action::CallFunction {
-                target: self.resource_location(&not_ret_func_name),
-            }),
-        });
+        if jump_info.may_return {
+            self.emit_action(Action::ExecuteIf {
+                condition: format!("score {} matches 1", self.local_variable("RETFLAG")),
+                then: Box::new(Action::Return),
+            });
+        }
+
+        if jump_info.may_break {
+            self.emit_action(Action::ExecuteIf {
+                condition: format!("score {} matches 1", self.current_break_flag()),
+                then: Box::new(Action::Return),
+            });
+        }
     }
 
     fn visit_command_literal(&mut self, command: &str) {
-        self.emit_action(Action::Direct { command: command.to_string() });
+        self.emit_action(Action::Direct {
+            command: command.to_string(),
+        });
     }
 
     fn visit_if(
@@ -379,22 +399,21 @@ impl CodeGenerator {
             self.unfinished_functions.pop().unwrap(),
         );
 
-        self.emit_action(Action::SetVariableToVariable {
-            first: self.get_flag(flag_tmp),
-            second: self.get_tmp(result_tmp),
-        });
         self.emit_action(Action::ExecuteIf {
-            condition: format!("score {} matches 1", self.get_flag(flag_tmp)),
+            condition: format!("score {} matches 1", self.get_tmp(result_tmp)),
             then: Box::new(Action::CallFunction {
                 target: self.resource_location(&true_func_name),
             }),
         });
+
+        self.account_for_jumps();
 
         if let Some(else_body) = else_body {
             let false_func = self.current_function().make_anonymous_child();
             let false_func_name = false_func.name.clone();
 
             self.unfinished_functions.push(false_func);
+            dbg!(&else_body);
             self.visit_node(else_body);
             self.ready_functions.insert(
                 false_func_name.clone(),
@@ -402,12 +421,77 @@ impl CodeGenerator {
             );
 
             self.emit_action(Action::ExecuteUnless {
-                condition: format!("score {} matches 1", self.get_flag(flag_tmp)),
+                condition: format!("score {} matches 1", self.get_tmp(result_tmp)),
                 then: Box::new(Action::CallFunction {
                     target: self.resource_location(&false_func_name),
                 }),
             });
         }
+
+        self.account_for_jumps();
+    }
+
+    fn visit_for(
+        &mut self,
+        init: &ParserNode,
+        cond: &ParserNode,
+        step: &ParserNode,
+        body: &ParserNode,
+    ) {
+        self.loop_depth += 1;
+
+        self.visit_node(init);
+
+        let loop_func = self.current_function().make_anonymous_child();
+        let loop_func_name = loop_func.name.clone();
+
+        self.unfinished_functions.push(loop_func);
+        self.visit_node(body);
+        self.visit_node(step);
+
+        self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
+        self.visit_node(cond);
+        let flag_tmp = self.end_current_evaluation();
+
+        self.emit_action(Action::ExecuteIf {
+            condition: format!("score {} matches 1", self.get_tmp(flag_tmp)),
+            then: Box::new(Action::CallFunction {
+                target: self.resource_location(&loop_func_name),
+            }),
+        });
+
+        self.ready_functions.insert(
+            loop_func_name.clone(),
+            self.unfinished_functions.pop().unwrap(),
+        );
+
+        self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
+        self.visit_node(cond);
+        let flag_tmp = self.end_current_evaluation();
+        self.flag_tmp_count += 1;
+
+        self.emit_action(Action::ExecuteIf {
+            condition: format!("score {} matches 1", self.get_tmp(flag_tmp)),
+            then: Box::new(Action::CallFunction {
+                target: self.resource_location(&loop_func_name),
+            }),
+        });
+
+        self.propagate_break = false;
+        self.account_for_jumps();
+
+        self.loop_depth -= 1;
+    }
+
+    fn visit_break(&mut self) {
+        self.emit_action(Action::SetVariableToNumber {
+            var: self.current_break_flag(),
+            val: 1,
+        });
+
+        self.emit_action(Action::Return);
+
+        self.propagate_break = true;
     }
 
     fn emit_action(&mut self, action: Action) {
@@ -498,6 +582,7 @@ impl CodeGenerator {
                 Self::write_action(str, then);
             }
             Action::Direct { command } => str.push_str(command),
+            Action::Return => str.push_str("return"),
         }
     }
 
@@ -511,6 +596,37 @@ impl CodeGenerator {
 
     fn local_variable(&self, name: &str) -> ScoreboardEntry {
         ScoreboardEntry::new(self.current_function().scoreboard.clone(), name.to_string())
+    }
+
+    fn current_break_flag(&self) -> ScoreboardEntry {
+        self.local_variable(&format!("BREAKFLAG{}", self.loop_depth))
+    }
+
+    fn account_for_return(&mut self) {
+        if !self.propagate_return {
+            return;
+        }
+
+        self.emit_action(Action::ExecuteIf {
+            condition: format!("score {} matches 1", self.local_variable("RETFLAG")),
+            then: Box::new(Action::Return),
+        });
+    }
+
+    fn account_for_break(&mut self) {
+        if !self.propagate_break {
+            return;
+        }
+
+        self.emit_action(Action::ExecuteIf {
+            condition: format!("score {} matches 1", self.current_break_flag()),
+            then: Box::new(Action::Return),
+        });
+    }
+
+    fn account_for_jumps(&mut self) {
+        self.account_for_return();
+        self.account_for_break();
     }
 }
 
@@ -561,6 +677,7 @@ enum Action {
     Direct {
         command: String,
     },
+    Return,
 }
 
 struct Function {

@@ -9,13 +9,19 @@ mod parser;
 mod types;
 
 fn main() {
-    let test = "
-        fn g() {
-            let x = 10;
-            x = 0;
-            x += x * 2;
+    let test = r#"
+        fn fizzbuzz(x: int) {
+            for let i = 1; i <= x; i += 1; {
+                if i == 15 {
+                    break;
+                }
+
+                /say hiiiii;
+            }
+
+            /say wagwan g;
         }
-    ";
+    "#;
 
     let codegen = CodeGenerator::compile_src(test, "test");
 

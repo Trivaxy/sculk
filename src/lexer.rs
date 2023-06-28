@@ -93,6 +93,12 @@ pub enum Token<'a> {
     #[token("else", priority = 20)]
     Else,
 
+    #[token("for")]
+    For,
+
+    #[token("break")]
+    Break,
+
     #[regex(r"true|false", |tok| tok.slice().parse())]
     Bool(bool),
 
@@ -182,9 +188,8 @@ impl<'a> TokenStream<'a> {
                 self.lexer.extras.last_line_idx = self.lexer.span().end;
             }
         }
-        
+
         self.lexer.bump(n);
         self.next = self.lexer.next();
     }
-
 }

@@ -27,15 +27,27 @@ pub struct ResourceLocation {
 
 impl ResourceLocation {
     pub fn new(namespace: String, path: String) -> Self {
-        Self { namespace, path, separator: ':' }
+        Self {
+            namespace,
+            path,
+            separator: ':',
+        }
     }
 
     pub fn scoreboard(namespace: String, path: String) -> Self {
-        Self { namespace, path, separator: '.' }
+        Self {
+            namespace,
+            path,
+            separator: '.',
+        }
     }
 
     pub fn with_separator(&self, separator: char) -> Self {
-        Self { namespace: self.namespace.clone(), path: self.path.clone(), separator }
+        Self {
+            namespace: self.namespace.clone(),
+            path: self.path.clone(),
+            separator,
+        }
     }
 }
 

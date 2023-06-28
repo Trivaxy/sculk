@@ -113,6 +113,37 @@ impl Validator {
 
                 SculkType::None
             }
+            ParserNode::For {
+                init,
+                cond,
+                step,
+                body,
+            } => {
+                self.push_loop_scope();
+
+                self.visit_node(init);
+
+                let cond_type = self.visit_node(cond);
+
+                if cond_type != SculkType::Bool {
+                    self.error(ValidationError::ExpectedBoolInForCondition(cond_type));
+                }
+
+                self.visit_node(step);
+
+                self.visit_node(body);
+
+                self.pop_scope();
+
+                SculkType::None
+            }
+            ParserNode::Break => {
+                if !self.is_in_loop() {
+                    self.error(ValidationError::CannotBreakOutsideLoop);
+                }
+
+                SculkType::None
+            }
             ParserNode::NumberLiteral(_) => SculkType::Integer,
             ParserNode::BoolLiteral(_) => SculkType::Bool,
             ParserNode::SelectorLiteral(_) => SculkType::Selector,
@@ -209,7 +240,9 @@ impl Validator {
                 let rhs_type = self.visit_node(rhs);
 
                 match op {
-                    Operation::GreaterThan
+                    Operation::CheckEquals
+                    | Operation::NotEquals
+                    | Operation::GreaterThan
                     | Operation::LessThan
                     | Operation::GreaterThanOrEquals
                     | Operation::LessThanOrEquals => {
@@ -234,11 +267,15 @@ impl Validator {
                 }
 
                 if lhs_type != SculkType::Integer {
-                    self.error(ValidationError::ArithmeticUnsupported { ty: lhs_type.clone() })
+                    self.error(ValidationError::ArithmeticUnsupported {
+                        ty: lhs_type.clone(),
+                    })
                 }
 
                 if rhs_type != SculkType::Integer {
-                    self.error(ValidationError::ArithmeticUnsupported { ty: rhs_type.clone() })
+                    self.error(ValidationError::ArithmeticUnsupported {
+                        ty: rhs_type.clone(),
+                    })
                 }
 
                 lhs_type.clone()
@@ -247,14 +284,16 @@ impl Validator {
                 let expr_type = self.visit_node(expr);
 
                 if expr_type != SculkType::Integer {
-                    self.error(ValidationError::ArithmeticUnsupported { ty: expr_type.clone() })
+                    self.error(ValidationError::ArithmeticUnsupported {
+                        ty: expr_type.clone(),
+                    })
                 }
 
                 match self.find_variable_type(name) {
                     Some(ty) => {
                         let ty = ty.clone();
 
-                        if ty != SculkType::Integer{
+                        if ty != SculkType::Integer {
                             self.error(ValidationError::ArithmeticUnsupported { ty: ty.clone() })
                         }
                     }
@@ -267,8 +306,11 @@ impl Validator {
             }
             ParserNode::Unary(expr, _) => self.visit_node(expr),
             ParserNode::CommandLiteral(_) => SculkType::None,
-            ParserNode::ReturnSafe(_) => unreachable!() // does not exist at this stage
         }
+    }
+
+    fn is_in_loop(&self) -> bool {
+        self.scopes.iter().rev().any(|scope| scope.is_loop)
     }
 
     fn scope_mut(&mut self) -> &mut Scope {
@@ -276,7 +318,11 @@ impl Validator {
     }
 
     fn push_scope(&mut self) {
-        self.scopes.push(Scope::new());
+        self.scopes.push(Scope::new(false));
+    }
+
+    fn push_loop_scope(&mut self) {
+        self.scopes.push(Scope::new(true));
     }
 
     fn pop_scope(&mut self) {
@@ -304,7 +350,10 @@ impl Validator {
 
 #[derive(Debug)]
 pub enum ValidationError {
+    CannotBreakOutsideLoop,
+    CannotContinueOutsideLoop,
     ExpectedBoolInIf(SculkType),
+    ExpectedBoolInForCondition(SculkType),
     UnknownVariable(String),
     UnknownFunction(String),
     VariableAssignmentTypeMismatch {
@@ -337,12 +386,14 @@ pub enum ValidationError {
 
 struct Scope {
     variables: HashMap<String, SculkType>,
+    is_loop: bool,
 }
 
 impl Scope {
-    fn new() -> Self {
+    fn new(is_loop: bool) -> Self {
         Self {
             variables: HashMap::new(),
+            is_loop,
         }
     }
 
