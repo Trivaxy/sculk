@@ -192,7 +192,7 @@ impl<'a> Parser<'a> {
         Ok(ParserNode::Block(statements))
     }
 
-    fn parse_statement(&mut self) -> ParseResult {
+    fn parse_statement_inner(&mut self) -> ParseResult {
         match self.tokens.peek() {
             Some(Token::Let) => self.parse_var_declaration(),
             Some(Token::Fn) => self.parse_func_declaration(),
@@ -206,11 +206,7 @@ impl<'a> Parser<'a> {
 
                 match self.tokens.peek() {
                     Some(Token::Equals) => self.parse_var_assignment(ident),
-                    Some(Token::LeftParens) => {
-                        let node = self.parse_func_call(ident);
-                        expect_tok!(self, Token::Semicolon, "expected ;");
-                        node
-                    }
+                    Some(Token::LeftParens) => self.parse_func_call(ident),
                     Some(Token::AddEquals)
                     | Some(Token::SubtractEquals)
                     | Some(Token::MultiplyEquals)
@@ -224,6 +220,22 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_statement(&mut self) -> ParseResult {
+        let stmt = self.parse_statement_inner()?;
+
+        match stmt {
+            ParserNode::For { .. }
+            | ParserNode::If { .. }
+            | ParserNode::FunctionDeclaration { .. }
+            | ParserNode::CommandLiteral(_) // command literals are a special case and handle the semicolon themselves
+            | ParserNode::Block(_) => Ok(stmt),
+            _ => {
+                expect_tok!(self, Token::Semicolon, "expected ;");
+                Ok(stmt)
+            }
+        }
+    }
+
     fn parse_var_declaration(&mut self) -> ParseResult {
         expect_tok!(self, Token::Let, "expected let");
 
@@ -232,8 +244,6 @@ impl<'a> Parser<'a> {
         expect_tok!(self, Token::Equals, "expected =");
 
         let expr = self.parse_expression()?;
-
-        expect_tok!(self, Token::Semicolon, "expected ;");
 
         match identifier {
             ParserNode::TypedIdentifier { name, ty } => Ok(ParserNode::VariableDeclaration {
@@ -254,8 +264,6 @@ impl<'a> Parser<'a> {
         expect_tok!(self, Token::Equals, "expected =");
 
         let expr = self.parse_expression()?;
-
-        expect_tok!(self, Token::Semicolon, "expected ;");
 
         Ok(ParserNode::VariableAssignment {
             name,
@@ -321,14 +329,11 @@ impl<'a> Parser<'a> {
 
         let expr = self.parse_expression()?;
 
-        expect_tok!(self, Token::Semicolon, "expected ;");
-
         Ok(ParserNode::Return(Box::new(expr)))
     }
 
     fn parse_break_statement(&mut self) -> ParseResult {
         expect_tok!(self, Token::Break, "expected break");
-        expect_tok!(self, Token::Semicolon, "expected ;");
 
         Ok(ParserNode::Break)
     }
@@ -390,12 +395,8 @@ impl<'a> Parser<'a> {
         expect_tok!(self, Token::For, "expected for");
 
         let init = self.parse_statement()?;
-        let cond = self.parse_expression()?;
-
-        expect_tok!(self, Token::Semicolon, "expected ;");
-
-        let step = self.parse_statement()?;
-
+        let cond = self.parse_expression_statement()?;
+        let step = self.parse_statement_inner()?;
         let body = self.parse_block()?;
 
         Ok(ParserNode::For {
@@ -596,8 +597,6 @@ impl<'a> Parser<'a> {
         };
 
         let expr = self.parse_expression()?;
-
-        expect_tok!(self, Token::Semicolon, "expected ; after expression");
 
         Ok(ParserNode::OpEquals {
             name,
