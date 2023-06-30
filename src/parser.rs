@@ -59,16 +59,15 @@ pub enum ParserNode {
     Block(Vec<ParserNode>),
     NumberLiteral(i32),
     BoolLiteral(bool),
-    SelectorLiteral(SelectorTarget),
     Identifier(String),
     TypedIdentifier {
         name: String,
-        ty: SculkType,
+        ty: String,
     },
     VariableDeclaration {
         name: String,
         expr: Box<ParserNode>,
-        ty: Option<SculkType>,
+        ty: Option<String>,
     },
     VariableAssignment {
         name: String,
@@ -77,7 +76,7 @@ pub enum ParserNode {
     FunctionDeclaration {
         name: String,
         args: Vec<ParserNode>,
-        return_ty: SculkType,
+        return_ty: Option<String>,
         body: Box<ParserNode>,
     },
     Return(Box<ParserNode>),
@@ -130,13 +129,6 @@ impl ParserNode {
             Self::Identifier(name) => name,
             Self::TypedIdentifier { name, .. } => name,
             _ => panic!("tried to get identifier from non-identifier node"),
-        }
-    }
-
-    pub fn as_type(&self) -> SculkType {
-        match self {
-            Self::TypedIdentifier { ty, .. } => ty.clone(),
-            _ => panic!("tried to get type from non-typed identifier node"),
         }
     }
 }
@@ -297,9 +289,9 @@ impl<'a> Parser<'a> {
             Some(Token::Arrow) => {
                 self.tokens.next(); // consume the arrow
                 let return_ty = self.parse_identifier()?;
-                str_to_type(return_ty.as_identifier())
+                Some(return_ty.as_identifier().to_string())
             }
-            _ => SculkType::None,
+            _ => None,
         };
 
         let body = self.parse_block()?;
@@ -435,22 +427,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_selector(&mut self) -> ParseResult {
-        let tok = self.tokens.next();
-
-        match tok {
-            Some(Token::Selector(target)) => Ok(ParserNode::SelectorLiteral(match target {
-                'a' => SelectorTarget::AllPlayers,
-                'p' => SelectorTarget::NearestPlayer,
-                'r' => SelectorTarget::RandomPlayer,
-                'e' => SelectorTarget::AllEntities,
-                's' => SelectorTarget::ExecutingEntity,
-                _ => unreachable!(),
-            })),
-            _ => self.error("expected selector"),
-        }
-    }
-
     fn parse_identifier(&mut self) -> ParseResult {
         let tok = self.tokens.next();
 
@@ -476,7 +452,6 @@ impl<'a> Parser<'a> {
                     _ => Ok(identifier),
                 }
             }
-            Some(Token::Selector(_)) => self.parse_selector(),
             Some(Token::LeftParens) => {
                 self.tokens.next();
                 let expr = self.parse_term();
@@ -661,7 +636,7 @@ impl<'a> Parser<'a> {
         expect_tok!(self, Token::Colon, "expected :");
 
         let ty = match self.tokens.next() {
-            Some(Token::Identifier(name)) => str_to_type(name),
+            Some(Token::Identifier(name)) => name.to_string(),
             _ => return self.error("expected valid type"),
         };
 
@@ -691,15 +666,6 @@ impl<'a> Parser<'a> {
                 _ => self.tokens.next(),
             };
         }
-    }
-}
-
-fn str_to_type(name: &str) -> SculkType {
-    match name {
-        "int" => SculkType::Integer,
-        "bool" => SculkType::Bool,
-        "selector" => SculkType::Selector,
-        _ => SculkType::Struct(name.to_string()),
     }
 }
 

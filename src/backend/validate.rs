@@ -6,6 +6,7 @@ use crate::{
 };
 
 // Performs type checking on the AST, and collects a list of errors if any are found
+// It takes in the raw AST from parsing the program, and produces a tagged AST where each node's type is known
 pub struct Validator {
     func_signatures: Cell<HashMap<String, FunctionSignature>>,
     current_return_type: SculkType,
@@ -23,19 +24,24 @@ impl Validator {
         }
     }
 
-    pub fn validate_program(mut self, ast: &ParserNode) -> Vec<ValidationError> {
-        self.visit_node(ast);
-        self.errors
+    pub fn validate_program(mut self, ast: ParserNode) -> Result<TypedNode, Vec<ValidationError>> {
+        let typed_ast = self.visit_node(ast);
+
+        if !self.errors.is_empty() {
+            return Err(self.errors);
+        }
+
+        Ok(typed_ast)
     }
 
-    fn visit_node(&mut self, node: &ParserNode) -> SculkType {
+    fn visit_node(&mut self, node: ParserNode) -> TypedNode {
         match node {
             ParserNode::Program(nodes) => {
                 for node in nodes {
                     self.visit_node(node);
                 }
 
-                SculkType::None
+                TypedNode::new(node, SculkType::None)
             }
             ParserNode::FunctionDeclaration {
                 name,
@@ -146,7 +152,6 @@ impl Validator {
             }
             ParserNode::NumberLiteral(_) => SculkType::Integer,
             ParserNode::BoolLiteral(_) => SculkType::Bool,
-            ParserNode::SelectorLiteral(_) => SculkType::Selector,
             ParserNode::Identifier(ident) => match self.find_variable_type(ident) {
                 Some(ty) => ty.clone(),
                 None => {
@@ -417,5 +422,16 @@ struct FunctionSignature {
 impl FunctionSignature {
     fn new(args: Vec<SculkType>, return_type: SculkType) -> Self {
         Self { args, return_type }
+    }
+}
+
+pub struct TypedNode {
+    inner: ParserNode,
+    ty: SculkType,
+}
+
+impl TypedNode {
+    pub fn new(inner: ParserNode, ty: SculkType) -> Self {
+        Self { inner, ty }
     }
 }

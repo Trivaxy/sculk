@@ -148,7 +148,6 @@ impl CodeGenerator {
             ParserNode::FunctionCall { name, args } => self.visit_function_call(name, args),
             ParserNode::Return(expr) => self.visit_return(expr),
             ParserNode::Block(nodes) => self.visit_block(nodes),
-            ParserNode::SelectorLiteral(_selector) => todo!(),
             ParserNode::TypedIdentifier { .. } => {}
             ParserNode::Unary(expr, op) => self.visit_unary(expr, *op),
             ParserNode::If {
