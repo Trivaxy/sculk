@@ -164,7 +164,6 @@ macro_rules! expect_tok {
 pub struct Parser<'a> {
     tokens: TokenStream<'a>,
     errors: Vec<ParseError>,
-    func_defs: HashMap<String, FunctionDefinition>,
 }
 
 impl<'a> Parser<'a> {
@@ -172,7 +171,6 @@ impl<'a> Parser<'a> {
         Self {
             tokens: TokenStream::new(src),
             errors: Vec::new(),
-            func_defs: HashMap::new(),
         }
     }
 
@@ -186,7 +184,7 @@ impl<'a> Parser<'a> {
             };
         }
 
-        ParserOutput::new(ParserNode::Program(functions), self.func_defs, self.errors)
+        ParserOutput::new(ParserNode::Program(functions), self.errors)
     }
 
     fn parse_block(&mut self) -> ParseResult {
@@ -316,18 +314,8 @@ impl<'a> Parser<'a> {
         };
 
         let body = self.parse_block()?;
-
+        
         let name = name.as_identifier().to_string();
-        self.func_defs.insert(
-            name.clone(),
-            FunctionDefinition {
-                name: name.clone(),
-                args: args
-                    .iter()
-                    .map(|arg| arg.as_identifier().to_string())
-                    .collect(),
-            },
-        );
 
         Ok(ParserNode::FunctionDeclaration {
             name: name.clone(),
@@ -724,19 +712,16 @@ impl<'a> Parser<'a> {
 
 pub struct ParserOutput {
     pub ast: ParserNode,
-    pub func_defs: HashMap<String, FunctionDefinition>,
     pub errs: Vec<ParseError>,
 }
 
 impl ParserOutput {
     fn new(
         ast: ParserNode,
-        func_defs: HashMap<String, FunctionDefinition>,
         errs: Vec<ParseError>,
     ) -> Self {
         Self {
             ast,
-            func_defs,
             errs,
         }
     }
