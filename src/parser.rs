@@ -79,7 +79,7 @@ pub enum ParserNode {
         return_ty: Option<String>,
         body: Box<ParserNode>,
     },
-    Return(Box<ParserNode>),
+    Return(Option<Box<ParserNode>>),
     FunctionCall {
         name: String,
         args: Vec<ParserNode>,
@@ -105,6 +105,14 @@ pub enum ParserNode {
         step: Box<ParserNode>,
         body: Box<ParserNode>,
     },
+    StructDefinition {
+        name: String,
+        fields: Vec<ParserNode>,
+    },
+    MemberAccess {
+        expr: Box<ParserNode>,
+        member: String,
+    },
     Break,
     CommandLiteral(String),
 }
@@ -129,6 +137,20 @@ impl ParserNode {
             Self::Identifier(name) => name,
             Self::TypedIdentifier { name, .. } => name,
             _ => panic!("tried to get identifier from non-identifier node"),
+        }
+    }
+
+    pub fn as_typed_identifier(&self) -> (&str, &str) {
+        match self {
+            Self::TypedIdentifier { name, ty } => (name, ty),
+            _ => panic!("tried to get typed identifier from non-typed identifier node"),
+        }
+    }
+
+    pub fn as_program(&self) -> &[ParserNode] {
+        match self {
+            Self::Program(stmts) => stmts,
+            _ => panic!("tried to get program from non-program node"),
         }
     }
 }
@@ -188,6 +210,7 @@ impl<'a> Parser<'a> {
         match self.tokens.peek() {
             Some(Token::Let) => self.parse_var_declaration(),
             Some(Token::Fn) => self.parse_func_declaration(),
+            Some(Token::Struct) => self.parse_struct_definition(),
             Some(Token::If) => self.parse_if(),
             Some(Token::For) => self.parse_for(),
             Some(Token::LeftBrace) => self.parse_block(),
@@ -219,6 +242,7 @@ impl<'a> Parser<'a> {
             ParserNode::For { .. }
             | ParserNode::If { .. }
             | ParserNode::FunctionDeclaration { .. }
+            | ParserNode::StructDefinition { .. }
             | ParserNode::CommandLiteral(_) // command literals are a special case and handle the semicolon themselves
             | ParserNode::Block(_) => Ok(stmt),
             _ => {
@@ -319,9 +343,14 @@ impl<'a> Parser<'a> {
     fn parse_return_statement(&mut self) -> ParseResult {
         expect_tok!(self, Token::Return, "expected return");
 
-        let expr = self.parse_expression()?;
+        let mut expr = match self.tokens.peek() {
+            Some(Token::Semicolon) => None,
+            _ => Some(self.parse_expression()?),
+        };
 
-        Ok(ParserNode::Return(Box::new(expr)))
+        expect_tok!(self, Token::Semicolon, "expected ;");
+
+        Ok(ParserNode::Return(expr.map(|expr| Box::new(expr))))
     }
 
     fn parse_break_statement(&mut self) -> ParseResult {
@@ -641,6 +670,33 @@ impl<'a> Parser<'a> {
         };
 
         Ok(ParserNode::TypedIdentifier { name, ty })
+    }
+
+    fn parse_struct_definition(&mut self) -> ParseResult {
+        expect_tok!(self, Token::Struct, "expected struct");
+
+        let name = self.parse_identifier()?;
+
+        expect_tok!(self, Token::LeftBrace, "expected {");
+
+        let mut fields = Vec::new();
+
+        while self.tokens.peek() != Some(&Token::RightBrace) {
+            let field = self.parse_typed_identifier(false)?;
+
+            if self.tokens.peek() != Some(&Token::RightBrace) {
+                expect_tok!(self, Token::Comma, "expected , or }");
+            }
+
+            fields.push(field);
+        }
+
+        expect_tok!(self, Token::RightBrace, "expected }");
+
+        Ok(ParserNode::StructDefinition {
+            name: name.as_identifier().to_string(),
+            fields,
+        })
     }
 
     fn error(&mut self, error: impl Into<String>) -> ParseResult {

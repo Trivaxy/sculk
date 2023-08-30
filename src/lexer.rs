@@ -99,6 +99,9 @@ pub enum Token<'a> {
     #[token("break")]
     Break,
 
+    #[token("struct")]
+    Struct,
+
     #[regex(r"true|false", |tok| tok.slice().parse())]
     Bool(bool),
 

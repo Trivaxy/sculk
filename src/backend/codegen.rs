@@ -1,17 +1,14 @@
-use std::{
-    collections::HashMap,
-    io::Write,
-    path::Path,
-    sync::atomic::{AtomicI32, Ordering},
-};
+use std::{collections::HashMap, io::Write, path::Path, rc::Rc};
 
 use crate::{
     data::{ResourceLocation, ScoreboardEntry},
     parser::{FunctionDefinition, JumpInfo, Operation, ParseError, Parser, ParserNode},
+    type_pool::TypePool,
     types::SculkType,
 };
 
 use super::{
+    function::{Function, FunctionSignature, ParamDef},
     rebranch,
     validate::{ValidationError, Validator},
 };
@@ -19,7 +16,8 @@ use super::{
 pub struct CodeGenerator {
     unfinished_functions: Vec<Function>,
     ready_functions: HashMap<String, Function>,
-    func_defs: HashMap<String, FunctionDefinition>,
+    func_signatures: HashMap<String, FunctionSignature>,
+    type_pool: TypePool,
     eval_stacks: Vec<EvaluationStack>,
     bin_op_depth: i32,
     anon_func_depth: i32,
@@ -38,7 +36,8 @@ impl CodeGenerator {
         let mut parse_output = parser.parse();
 
         let validator = Validator::new();
-        let validation_errs = validator.validate_program(&parse_output.ast);
+
+        let (func_signatures, type_pool, validation_errs) = validator.dissolve();
 
         errors.extend(
             parse_output
@@ -63,13 +62,14 @@ impl CodeGenerator {
             "_sculkmain".to_string(),
             ResourceLocation::new(namespace.to_string(), "_sculkmain".to_string()),
             vec![],
-            SculkType::None,
+            type_pool.none(),
         );
 
         let mut gen = Self {
             unfinished_functions: vec![],
             ready_functions: HashMap::new(),
-            func_defs: parse_output.func_defs,
+            func_signatures,
+            type_pool,
             eval_stacks: vec![],
             bin_op_depth: 0,
             anon_func_depth: 0,
@@ -82,9 +82,13 @@ impl CodeGenerator {
 
         gen.compile(&parse_output.ast);
 
-        for func in gen.ready_functions.values().filter(|func| !func.anonymous) {
+        for func in gen
+            .ready_functions
+            .values()
+            .filter(|func| !func.is_anonymous())
+        {
             sculk_main.actions.push(Action::CreateStorage {
-                name: ResourceLocation::scoreboard(namespace.to_string(), func.name.clone())
+                name: ResourceLocation::scoreboard(namespace.to_string(), func.name().to_string())
                     .to_string(),
             });
         }
@@ -111,7 +115,7 @@ impl CodeGenerator {
             }
 
             let mut path = dir.to_path_buf();
-            path.push(&func.name);
+            path.push(&func.name());
             path.set_extension("mcfunction");
 
             let mut file = std::fs::File::create(path).unwrap();
@@ -140,11 +144,8 @@ impl CodeGenerator {
             }
             ParserNode::Program(nodes) => self.visit_program(nodes),
             ParserNode::FunctionDeclaration {
-                name,
-                args,
-                return_ty,
-                body,
-            } => self.visit_function_declaration(name, args, return_ty, body),
+                name, args, body, ..
+            } => self.visit_function_declaration(name, args, body),
             ParserNode::FunctionCall { name, args } => self.visit_function_call(name, args),
             ParserNode::Return(expr) => self.visit_return(expr),
             ParserNode::Block(nodes) => self.visit_block(nodes),
@@ -166,6 +167,7 @@ impl CodeGenerator {
             }
             ParserNode::Break => self.visit_break(),
             ParserNode::CommandLiteral(command) => self.visit_command_literal(command),
+            ParserNode::StructDefinition { .. } => {} // nothing to be done, structs are handled in the validator
         }
 
         self.propagate_return = false;
@@ -275,24 +277,18 @@ impl CodeGenerator {
         });
     }
 
-    // TODO: stop people from defining the same function twice or within other functions
-    fn visit_function_declaration(
-        &mut self,
-        name: &str,
-        args: &[ParserNode],
-        return_ty: &SculkType,
-        body: &ParserNode,
-    ) {
+    // TODO: stop people from defining functions within other functions?
+    fn visit_function_declaration(&mut self, name: &str, args: &[ParserNode], body: &ParserNode) {
+        let func_signature = self.func_signatures.get(name).unwrap();
+
         self.unfinished_functions.push(Function::new_empty(
             name.to_string(),
             self.scoreboard(name),
-            args.iter()
-                .map(|node| node.as_identifier().to_string())
-                .collect(),
-            return_ty.clone(),
+            func_signature.params().to_vec(),
+            func_signature.return_type(),
         ));
 
-        if !return_ty.is_none() {
+        if func_signature.return_type() != self.type_pool.none() {
             self.emit_action(Action::SetVariableToNumber {
                 var: self.local_variable("RETFLAG"),
                 val: 0,
@@ -303,6 +299,7 @@ impl CodeGenerator {
 
         self.ready_functions
             .insert(name.to_string(), self.unfinished_functions.pop().unwrap());
+
         self.flag_tmp_count = 0;
     }
 
@@ -319,7 +316,11 @@ impl CodeGenerator {
 
         self.push_eval_instr(EvaluationInstruction::CallFunction(
             self.resource_location(name),
-            self.func_defs[name].args.clone(),
+            self.func_signatures[name]
+                .params()
+                .iter()
+                .map(|p| p.name().to_string())
+                .collect(),
         ));
 
         if use_new_stack {
@@ -327,17 +328,23 @@ impl CodeGenerator {
         }
     }
 
-    fn visit_return(&mut self, expr: &ParserNode) {
-        self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
-        self.visit_node(expr);
-        let result_tmp = self.end_current_evaluation();
+    fn visit_return(&mut self, expr: &Option<Box<ParserNode>>) {
+        if let Some(expr) = expr {
+            self.begin_evaluation_for_scoreboard(self.active_scoreboard(), 0);
+            self.visit_node(expr);
+            let result_tmp = self.end_current_evaluation();
 
-        self.emit_action(Action::SetVariableToVariable {
-            first: self.local_variable("RET"),
-            second: self.get_tmp(result_tmp),
+            self.emit_action(Action::SetVariableToVariable {
+                first: self.local_variable("RET"),
+                second: self.get_tmp(result_tmp),
+            });
+        }
+
+        self.emit_action(Action::SetVariableToNumber {
+            var: self.local_variable("RETFLAG"),
+            val: 1,
         });
 
-        self.emit_action(Action::SetVariableToNumber { var: self.local_variable("RETFLAG"), val: 1 });
         self.emit_action(Action::Return);
 
         self.propagate_return = true;
@@ -345,7 +352,7 @@ impl CodeGenerator {
 
     fn visit_jump_safe(&mut self, node: &ParserNode, jump_info: JumpInfo) {
         let not_ret_func = self.current_function().make_anonymous_child();
-        let not_ret_func_name = not_ret_func.name.clone();
+        let not_ret_func_name = not_ret_func.name().to_string();
 
         self.unfinished_functions.push(not_ret_func);
         self.visit_node(node);
@@ -389,7 +396,7 @@ impl CodeGenerator {
         self.flag_tmp_count += 1;
 
         let true_func = self.current_function().make_anonymous_child();
-        let true_func_name = true_func.name.clone();
+        let true_func_name = true_func.name().to_string();
 
         self.unfinished_functions.push(true_func);
         self.visit_node(body);
@@ -409,13 +416,13 @@ impl CodeGenerator {
 
         if let Some(else_body) = else_body {
             let false_func = self.current_function().make_anonymous_child();
-            let false_func_name = false_func.name.clone();
+            let false_func_name = false_func.name().to_string();
 
             self.unfinished_functions.push(false_func);
             dbg!(&else_body);
             self.visit_node(else_body);
             self.ready_functions.insert(
-                false_func_name.clone(),
+                false_func_name.to_string(),
                 self.unfinished_functions.pop().unwrap(),
             );
 
@@ -442,7 +449,7 @@ impl CodeGenerator {
         self.visit_node(init);
 
         let loop_func = self.current_function().make_anonymous_child();
-        let loop_func_name = loop_func.name.clone();
+        let loop_func_name = loop_func.name().to_string();
 
         self.unfinished_functions.push(loop_func);
         self.visit_node(body);
@@ -518,7 +525,7 @@ impl CodeGenerator {
     }
 
     fn active_scoreboard(&self) -> ResourceLocation {
-        self.current_function().scoreboard.clone()
+        self.current_function().scoreboard().clone()
     }
 
     fn begin_evaluation_for_scoreboard(&mut self, scoreboard: ResourceLocation, min_tmp: i32) {
@@ -594,7 +601,10 @@ impl CodeGenerator {
     }
 
     fn local_variable(&self, name: &str) -> ScoreboardEntry {
-        ScoreboardEntry::new(self.current_function().scoreboard.clone(), name.to_string())
+        ScoreboardEntry::new(
+            self.current_function().scoreboard().clone(),
+            name.to_string(),
+        )
     }
 
     fn current_break_flag(&self) -> ScoreboardEntry {
@@ -630,7 +640,7 @@ impl CodeGenerator {
 }
 
 #[derive(Debug)]
-enum Action {
+pub enum Action {
     CreateStorage {
         name: String,
     },
@@ -677,76 +687,6 @@ enum Action {
         command: String,
     },
     Return,
-}
-
-struct Function {
-    name: String,
-    scoreboard: ResourceLocation,
-    args: HashMap<String, usize>,
-    idx_to_arg: HashMap<usize, String>,
-    return_ty: SculkType,
-    actions: Vec<Action>,
-    anonymous: bool,
-}
-
-static ANONYMOUS_FUNC_COUNT: AtomicI32 = AtomicI32::new(0);
-
-impl Function {
-    fn new_empty(
-        name: String,
-        scoreboard: ResourceLocation,
-        args: Vec<String>,
-        return_ty: SculkType,
-    ) -> Self {
-        Function {
-            name,
-            scoreboard,
-            args: args
-                .iter()
-                .enumerate()
-                .map(|(i, arg)| (arg.clone(), i))
-                .collect(),
-            idx_to_arg: args
-                .iter()
-                .enumerate()
-                .map(|(i, arg)| (i, arg.clone()))
-                .collect(),
-            return_ty,
-            actions: Vec::new(),
-            anonymous: false,
-        }
-    }
-
-    fn new_empty_mapped_args(
-        name: String,
-        scoreboard: ResourceLocation,
-        args: HashMap<String, usize>,
-        idx_to_arg: HashMap<usize, String>,
-        return_ty: SculkType,
-    ) -> Self {
-        Function {
-            name,
-            scoreboard,
-            args,
-            idx_to_arg,
-            return_ty,
-            actions: Vec::new(),
-            anonymous: false,
-        }
-    }
-
-    fn make_anonymous_child(&self) -> Self {
-        let mut func = Function::new_empty_mapped_args(
-            format!("anon_{}", ANONYMOUS_FUNC_COUNT.load(Ordering::Relaxed)),
-            self.scoreboard.clone(),
-            self.args.clone(),
-            self.idx_to_arg.clone(),
-            self.return_ty.clone(),
-        );
-        ANONYMOUS_FUNC_COUNT.fetch_add(1, Ordering::SeqCst);
-        func.anonymous = true;
-        func
-    }
 }
 
 #[derive(Debug)]
