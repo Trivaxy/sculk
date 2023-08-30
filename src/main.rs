@@ -6,8 +6,6 @@ mod backend;
 mod data;
 mod lexer;
 mod parser;
-mod type_pool;
-mod types;
 
 fn main() {
     let test = r#"

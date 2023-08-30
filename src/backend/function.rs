@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use crate::{data::ResourceLocation, type_pool::TypeKey, types::SculkType};
+use crate::data::ResourceLocation;
 
-use super::codegen::Action;
+use super::{codegen::Action, type_pool::TypeKey};
 
 pub struct FunctionSignature {
     name: String,

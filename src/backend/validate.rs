@@ -1,9 +1,9 @@
 use std::{cell::Cell, collections::HashMap, env::ArgsOs, rc::Rc};
 
 use crate::{
+    backend::type_pool::{TypeKey, TypePool},
+    backend::types::{FieldDef, SculkType, StructDef},
     parser::{Operation, ParserNode},
-    type_pool::{TypeKey, TypePool},
-    types::{FieldDef, SculkType, StructDef},
 };
 
 use super::function::{FunctionSignature, ParamDef};
@@ -274,7 +274,10 @@ impl Validator {
                                 .iter()
                                 .map(|param| param.param_type())
                                 .collect(),
-                            func.params().iter().map(|param| param.name().to_owned()).collect(),
+                            func.params()
+                                .iter()
+                                .map(|param| param.name().to_owned())
+                                .collect(),
                         ),
                         None => {
                             let struct_def = self.type_pool.get_type_key(name).unwrap();
@@ -357,8 +360,9 @@ impl Validator {
                 }
 
                 if lhs_type != self.type_pool.int() {
-                    self.errors
-                        .add(ValidationError::ArithmeticUnsupported { ty: lhs_type.clone() })
+                    self.errors.add(ValidationError::ArithmeticUnsupported {
+                        ty: lhs_type.clone(),
+                    })
                 }
 
                 if rhs_type != self.type_pool.int() {
@@ -426,10 +430,7 @@ impl Validator {
         // second pass to fill in concrete struct types from the nodes
         for (name, fields) in &struct_defs {
             for field in *fields {
-                let struct_type_key = self
-                    .type_pool
-                    .get_type_key(name)
-                    .unwrap();
+                let struct_type_key = self.type_pool.get_type_key(name).unwrap();
 
                 let mut struct_type = struct_type_key.get_mut();
 
@@ -438,7 +439,10 @@ impl Validator {
 
                 match field_type {
                     Some(ty) => {
-                        match struct_type.as_struct_def_mut().add_field(FieldDef::new(field_name.to_string(), ty)) {
+                        match struct_type
+                            .as_struct_def_mut()
+                            .add_field(FieldDef::new(field_name.to_string(), ty))
+                        {
                             Ok(_) => {}
                             Err(_) => self.errors.add(ValidationError::StructFieldAlreadyDefined {
                                 struct_name: name.to_string(),
@@ -455,10 +459,7 @@ impl Validator {
 
         // third pass to check for self-referencing structs
         for (name, fields) in struct_defs {
-            let struct_type_key = self
-                .type_pool
-                .get_type_key(name)
-                .unwrap();
+            let struct_type_key = self.type_pool.get_type_key(name).unwrap();
 
             let struct_type = struct_type_key.get();
             let struct_def = struct_type.as_struct_def();

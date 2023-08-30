@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    lexer::{Token, TokenStream},
-    types::SculkType,
-};
+use crate::lexer::{Token, TokenStream};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Operation {

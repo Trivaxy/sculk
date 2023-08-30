@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::types::SculkType;
+use crate::backend::types::SculkType;
 
 type InternalTypeStorage = Rc<RefCell<Vec<SculkType>>>;
 

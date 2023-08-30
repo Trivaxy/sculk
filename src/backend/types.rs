@@ -1,6 +1,6 @@
 use std::cell::Ref;
 
-use crate::type_pool::TypeKey;
+use super::type_pool::TypeKey;
 
 #[derive(Debug, Clone)]
 pub enum SculkType {
@@ -88,7 +88,7 @@ impl StructDef {
         while !field_types.is_empty() {
             let field_type_key = field_types.pop().unwrap();
             let field_type = &*field_type_key.get();
-            
+
             if let SculkType::Struct(def) = field_type {
                 if def.name == self.name {
                     return true;
