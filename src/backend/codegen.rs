@@ -3,8 +3,8 @@ use std::{collections::HashMap, io::Write, path::Path, rc::Rc};
 use crate::{
     data::{ResourceLocation, ScoreboardEntry},
     parser::{FunctionDefinition, JumpInfo, Operation, ParseError, Parser, ParserNode},
-    type_pool::TypePool,
-    types::SculkType,
+    backend::type_pool::TypePool,
+    backend::types::SculkType,
 };
 
 use super::{
