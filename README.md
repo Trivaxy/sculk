@@ -1,18 +1,24 @@
 # Sculk
-Sculk is a scripting language designed to compile into Minecraft datapacks. Using Sculk, you can easily create datapacks with complex functionalities and logic while remaining in the comfort of a simple and easy language.
+Sculk is a scripting language designed to compile into Minecraft datapacks. Far more than just a preprocessor, Sculk is a language that abstracts away the notion of using commands, and instead empowers you to focus purely on your logic and your ideas instead of the implementation details. No more constantly worrying about implementing complicated expressions, scoreboard management, decimal emulation, or dreading the lack of control flow. [Sculk gives it all to you, and more.](https://github.com/Trivaxy/sculk/wiki)
 
 # Motivation
-Minecraft possesses a wide variety of commands in the game. Most of them are easy to learn and use, and often perform just one singular task. Originally, commands were only meant to be administrative actions that players can do - nothing more, nothing less.
+Back in Minecraft's early days, commands were nothing more than simple administrative actions players can perform. The syntax was clear and there really wasn't much to it.
 
-However, players eventually noticed that with some clever tricks and techniques, those commands can be pushed to do far greater things: Gameplay mechanics, features, logic, and the list goes on - but this came at a cost: using them can be unintuitive or difficult, especially as projects grow more complex and demanding. Many things that are easily expressible in normal programming languages are either cumbersome or very difficult to represent using only commands.
+Fast forward to 1.4.2 and command blocks were introduced. Suddenly, commands could now be used in-world to create gameplay experiences, maps, logic and so on. The system was still rudimentary back then, but this would pave the way for commands to evolve in the future.
 
-It's clear that Minecraft's commands were never meant to be used this way, and although Minecraft has taken steps to make the lives of datapack developers easier, the system itself hasn't changed and it likely never will. 
+As more and more updates dropped, commands grew and became more powerful. Several overhauls, particularly the addition of `execute`, made commands a lot more versatile and capable. Players were not slow to take full advantage of every new feature that was added, and often pushed the limits of what was possible.
 
-To alleviate some of those pain points, many great tools have been created to make the process of creating datapacks easier. They are often useful and can be powerful, but they share the same design choice: they are all, fundamentally, preprocessors that follow an elaborate expansion scheme. You will still be thinking in terms of functions and commands, and these tools emphasize their power at compile-time, but fall short at runtime.
+Fast forward yet again to 1.13, which marked the introduction of datapacks as a whole, and by extension, mcfunctions. Players finally had a semblance of some form of "scripting" in the game, instead of having to rely on command blocks and redstone, and most importantly in a way that was easy to distribute and use.
 
-Sculk targets a different approach: it is a scripting language that is designed to feel as if it is being run by the game itself. It has runtime semantics, designed to conceal implementation details such as scoreboards, storage, functions, etc. and instead fixates on empowering you to focus on the logic of your datapack - not the gritty, boilerplate/verbose details of *how* to implement it.
+All of the additions that accumulated over the years were positive, but they also came with a cost. Commands had experienced a big jump in complexity, and their usage was no longer as clear as it used to be. Players in the community often want to accomplish endeavors that, while sounding simple on paper, are either verbose or tedious to implement via commands. Furthermore, utilizing commands to their full potential requires a lot of intimate knowledge about the game's inner workings, its mechanics, quirks and limitations, and the list goes on.
 
-Put simply, Sculk is one answer to the question *"What if Java Edition had a scripting language?"*. If other tools are like C's preprocessor, Sculk is like C itself.
+It's not that commands had become bad by any means - we, as players in the community, are creative (and greedy for more features!) and the solutions we want are often impossible, unintuitive or just plain annoying to implement using commands. 
+
+Many tools were made to try and address these issues ([beet](https://github.com/mcbeet/beet), [sandstone](https://github.com/sandstone-mc/sandstone), [trident](https://energyxxer.com/trident/), and a lot others), and they're all powerful in their own right.
+
+One thing that unites those aforementioned tools is that they place heavy emphasis on compile-time features and reduction of verbosity. This is great, but they expose gritty details such as scoreboards, data storage, etc. and often feel a lot more like a preprocessor or just alternative syntax for commands. They perform well as *build tools* but poorly as *abstractions*. It's not a bad thing, it's simply a design choice, but it's  not what I'm looking for.
+
+Sculk focuses on a different approach: it's a *runtime* language designed to make you *forget* that you're working with commands. It's meant to be and feel like it's executed by the game itself - one answer to the "What if Java Edition had proper scripting?" question. You are given all your familiar high-level language constructs that you know and love unconditionally, freeing up your mind to focus on your ideas and your logic, instead of the implementation details.
 
 # Usage
 
