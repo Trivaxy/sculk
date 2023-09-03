@@ -1,6 +1,7 @@
 use std::{
     cell::{Ref, RefCell, RefMut},
     collections::HashMap,
+    fmt::Display,
     rc::Rc,
 };
 
@@ -65,6 +66,34 @@ impl TypePool {
     pub fn has_type(&self, name: &str) -> bool {
         self.type_map.contains_key(name)
     }
+
+    pub fn iter(&self) -> TypePoolIterator {
+        TypePoolIterator {
+            pool: self.pool.clone(),
+            idx: 0,
+        }
+    }
+}
+
+pub struct TypePoolIterator {
+    pool: InternalTypeStorage,
+    idx: usize,
+}
+
+impl Iterator for TypePoolIterator {
+    type Item = TypeKey;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.pool.borrow().len() {
+            return None;
+        }
+
+        let ty = TypeKey::new(self.pool.clone(), self.idx);
+
+        self.idx += 1;
+
+        Some(ty)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -92,5 +121,11 @@ impl TypeKey {
 impl PartialEq for TypeKey {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id && Rc::ptr_eq(&self.pool, &other.pool)
+    }
+}
+
+impl Display for TypeKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.get().fmt(f)
     }
 }

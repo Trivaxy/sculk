@@ -1,10 +1,10 @@
 use std::{collections::HashMap, io::Write, path::Path, rc::Rc};
 
 use crate::{
-    data::{ResourceLocation, ScoreboardEntry},
-    parser::{FunctionDefinition, JumpInfo, Operation, ParseError, Parser, ParserNode},
     backend::type_pool::TypePool,
     backend::types::SculkType,
+    data::{ResourceLocation, ScoreboardEntry},
+    parser::{FunctionDefinition, JumpInfo, Operation, ParseError, Parser, ParserNode},
 };
 
 use super::{
@@ -13,7 +13,7 @@ use super::{
     validate::{ValidationError, Validator},
 };
 
-pub struct CodeGenerator {
+pub struct CodeGenerator_Old {
     unfinished_functions: Vec<Function>,
     ready_functions: HashMap<String, Function>,
     func_signatures: HashMap<String, FunctionSignature>,
@@ -168,6 +168,7 @@ impl CodeGenerator {
             ParserNode::Break => self.visit_break(),
             ParserNode::CommandLiteral(command) => self.visit_command_literal(command),
             ParserNode::StructDefinition { .. } => {} // nothing to be done, structs are handled in the validator
+            ParserNode::MemberAccess { .. } => todo!()
         }
 
         self.propagate_return = false;

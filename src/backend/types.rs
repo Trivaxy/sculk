@@ -1,4 +1,4 @@
-use std::cell::Ref;
+use std::{cell::Ref, fmt::Display};
 
 use super::type_pool::TypeKey;
 
@@ -50,6 +50,20 @@ impl PartialEq for SculkType {
             (Bool, Bool) => true,
             (Struct(def1), Struct(def2)) => def1.name == def2.name, // TODO: Namespacing
             _ => false,
+        }
+    }
+}
+
+impl Display for SculkType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use SculkType::*;
+
+        match self {
+            None => write!(f, "none"),
+            Unknown => write!(f, "unknown"),
+            Integer => write!(f, "int"),
+            Bool => write!(f, "bool"),
+            Struct(def) => write!(f, "{}", def.name),
         }
     }
 }

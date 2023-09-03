@@ -173,6 +173,11 @@ impl Validator {
             },
             ParserNode::TypedIdentifier { .. } => unreachable!(),
             ParserNode::VariableDeclaration { name, expr, ty } => {
+                if self.scope_stack.variable_exists(name) {
+                    self.errors
+                        .add(ValidationError::VariableAlreadyDefined(name.clone()));
+                }
+
                 let specified_type = match ty {
                     Some(ty) => self.type_pool.get_type_key(ty).or_else(|| {
                         self.errors.add(ValidationError::UnknownType(ty.clone()));
@@ -400,6 +405,7 @@ impl Validator {
             ParserNode::Unary(expr, _) => self.visit_node(expr),
             ParserNode::CommandLiteral(_) => self.type_pool.none(),
             ParserNode::StructDefinition { .. } => self.type_pool.none(), // structs are already scanned in advance
+            ParserNode::MemberAccess { .. } => todo!(),
         }
     }
 
@@ -555,6 +561,7 @@ pub enum ValidationError {
     ExpectedBoolInForCondition(TypeKey),
     UnknownVariable(String),
     UnknownFunction(String),
+    VariableAlreadyDefined(String),
     VariableAssignmentTypeMismatch {
         name: String,
         expected: TypeKey,
@@ -639,6 +646,16 @@ impl ScopeStack {
         }
 
         None
+    }
+
+    fn variable_exists(&self, name: &str) -> bool {
+        for scope in self.scopes.iter().rev() {
+            if scope.get_variable(name).is_some() {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

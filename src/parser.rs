@@ -150,6 +150,13 @@ impl ParserNode {
             _ => panic!("tried to get program from non-program node"),
         }
     }
+
+    pub fn as_block(&self) -> &[ParserNode] {
+        match self {
+            Self::Block(stmts) => stmts,
+            _ => panic!("tried to get block from non-block node"),
+        }
+    }
 }
 
 macro_rules! expect_tok {
@@ -175,16 +182,26 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(mut self) -> ParserOutput {
-        let mut functions = Vec::new();
+        let mut nodes = Vec::new();
 
         while self.tokens.peek().is_some() {
-            match self.parse_func_declaration() {
-                Ok(stmt) => functions.push(stmt),
-                Err(_) => break, // error already logged, continue parsing
-            };
+            match self.tokens.peek().unwrap() {
+                Token::Fn => match self.parse_func_declaration() {
+                    Ok(stmt) => nodes.push(stmt),
+                    Err(_) => continue, // error already logged, continue parsing
+                },
+                Token::Struct => match self.parse_struct_definition() {
+                    Ok(stmt) => nodes.push(stmt),
+                    Err(_) => continue, // error already logged, continue parsing
+                },
+                _ => {
+                    self.error("unexpected token or symbol");
+                    continue;
+                },
+            }
         }
 
-        ParserOutput::new(ParserNode::Program(functions), self.errors)
+        ParserOutput::new(ParserNode::Program(nodes), self.errors)
     }
 
     fn parse_block(&mut self) -> ParseResult {
@@ -314,7 +331,7 @@ impl<'a> Parser<'a> {
         };
 
         let body = self.parse_block()?;
-        
+
         let name = name.as_identifier().to_string();
 
         Ok(ParserNode::FunctionDeclaration {
@@ -328,12 +345,10 @@ impl<'a> Parser<'a> {
     fn parse_return_statement(&mut self) -> ParseResult {
         expect_tok!(self, Token::Return, "expected return");
 
-        let mut expr = match self.tokens.peek() {
+        let expr = match self.tokens.peek() {
             Some(Token::Semicolon) => None,
             _ => Some(self.parse_expression()?),
         };
-
-        expect_tok!(self, Token::Semicolon, "expected ;");
 
         Ok(ParserNode::Return(expr.map(|expr| Box::new(expr))))
     }
@@ -704,6 +719,8 @@ impl<'a> Parser<'a> {
                     return;
                 }
                 Token::Let => return,
+                Token::Struct => return,
+                Token::Fn => return,
                 _ => self.tokens.next(),
             };
         }
@@ -716,14 +733,8 @@ pub struct ParserOutput {
 }
 
 impl ParserOutput {
-    fn new(
-        ast: ParserNode,
-        errs: Vec<ParseError>,
-    ) -> Self {
-        Self {
-            ast,
-            errs,
-        }
+    fn new(ast: ParserNode, errs: Vec<ParseError>) -> Self {
+        Self { ast, errs }
     }
 }
 
