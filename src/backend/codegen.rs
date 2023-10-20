@@ -23,7 +23,7 @@ impl CodeGen {
         for func in &self.func_irs {
             for instr in func.body() {
                 match instr {
-                    
+                    _ => todo!()
                 }
             }
         }
