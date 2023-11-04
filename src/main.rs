@@ -15,7 +15,7 @@ fn main() {
         y: int,
         z: int,
     }
-    
+
     fn is_prime(n: int) -> bool {
         for let i = 2; i * i <= n; i += 1 {
             if n % i == 0 { return false; }
@@ -73,7 +73,7 @@ fn main() {
     for func in funcs {
         s.push_str(
             format!(
-                "function {}({}):",
+                "fn {}({}) -> {}",
                 func.name(),
                 signatures
                     .get(func.name())
@@ -82,7 +82,8 @@ fn main() {
                     .iter()
                     .map(|p| format!("{}: {}", p.name(), p.param_type()))
                     .collect::<Vec<String>>()
-                    .join(", ")
+                    .join(", "),
+                signatures.get(func.name()).unwrap().return_type()
             )
             .as_str(),
         );

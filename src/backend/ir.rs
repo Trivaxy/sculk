@@ -141,7 +141,7 @@ impl IrCompiler {
 
     // Takes in a function's name and its respective body in the AST, and compiles it into Sculk IR
     fn compile_function(&mut self, name: String, body: &[ParserNode]) -> IrFunction {
-        self.builder.begin(name);
+        self.builder.begin(self.func_signatures.get(&name).unwrap());
 
         for node in body {
             self.visit_node(node);
@@ -358,9 +358,14 @@ impl IrFunctionBuilder {
         }
     }
 
-    fn begin(&mut self, name: String) {
-        self.function = Some(IrFunction::new(name));
+    fn begin(&mut self, signature: &FunctionSignature) {
+        self.function = Some(IrFunction::new(signature.name().to_owned()));
         self.locals.clear();
+
+        // Give the first local indices to the function parameters
+        for (idx, param) in signature.params().iter().enumerate() {
+            self.locals.insert(param.name().to_owned(), idx);
+        }
     }
 
     fn emit(&mut self, instr: Instruction) {
