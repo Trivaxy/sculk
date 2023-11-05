@@ -11,7 +11,7 @@ use super::{function::FunctionSignature, type_pool::TypePool, types::FieldDef};
 /// 
 /// Sculk's IR is stack-based, and is kept simple intentionally.
 /// At this stage of compilation, information about parameter and local names is lost.
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Instruction {
     PushInteger(i32),
     PushBoolean(bool),

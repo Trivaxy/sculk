@@ -25,7 +25,7 @@ impl CodeGen {
         let mut compiled = Vec::new();
 
         for func in funcs {
-            let mut output = self.compile_instr_sequence(ResourceLocation::new(self.pack_name.clone(), func.name().to_owned()), func.body());
+            let mut output = self.compile_instr_sequence(ResourceLocation::new(self.pack_name.clone(), func.name().to_owned()), func.body(), EvaluationStack::new(ResourceLocation::new(self.pack_name.clone(), func.name().to_owned()).with_separator('_').to_string()));
             compiled.append(&mut output.0);
         }
 
@@ -36,8 +36,7 @@ impl CodeGen {
     // The sequence is assumed to either be the body of an IrFunction, or the body of a block (excluding the delimiting startblock/endblock instructions)
     // Returns a tuple containing the compiled functions, and two booleans representing whether the function should propagate a return or break
     // The LAST function in the returned collection is the outermost function/the function's body, and the rest are anonymous functions
-    fn compile_instr_sequence(&self, name: ResourceLocation, ir: &[Instruction]) -> (Vec<CompiledFunction>, bool, bool) {
-        let mut eval_stack = EvaluationStack::new(name.with_separator('_').to_string());
+    fn compile_instr_sequence(&self, name: ResourceLocation, ir: &[Instruction], mut eval_stack: EvaluationStack) -> (Vec<CompiledFunction>, bool, bool) {
         let mut block_stack = Vec::new();
         let mut propagate_return = false;
         let mut propagate_break = false;
@@ -46,6 +45,9 @@ impl CodeGen {
         let mut i = 0;
         while i < ir.len() {
             let instr = &ir[i];
+
+            dbg!(instr);
+            dbg!(&eval_stack.stack, &eval_stack.available_slots, &eval_stack.used_slots);
 
             match instr {
                 Instruction::PushInteger(n) => eval_stack.push_integer(*n),
@@ -101,7 +103,7 @@ impl CodeGen {
                     }
 
                     let block_ir = &ir[i + 1..end_idx];
-                    let compiled_block_info = self.compile_instr_sequence(ResourceLocation::new(name.namespace.clone(), format!("{}{}", name.path, ANON_FUNC_COUNT.fetch_add(1, Ordering::Relaxed))), block_ir);
+                    let compiled_block_info = self.compile_instr_sequence(ResourceLocation::new(name.namespace.clone(), format!("{}{}", name.path, ANON_FUNC_COUNT.fetch_add(1, Ordering::Relaxed))), block_ir, eval_stack.create_child());
 
                     propagate_return |= compiled_block_info.1;
                     propagate_break |= compiled_block_info.2;
@@ -141,7 +143,6 @@ impl CodeGen {
     }
 }
 
-#[derive(Default)]
 struct EvaluationStack {
     objective: String,
     available_slots: VecDeque<i32>,
@@ -154,7 +155,10 @@ impl EvaluationStack {
     fn new(objective: String) -> Self {
         Self {
             objective,
-            ..Default::default()
+            available_slots: VecDeque::new(),
+            used_slots: HashSet::new(),
+            commands: Vec::new(),
+            stack: Vec::new(),
         }
     }
 
@@ -445,15 +449,24 @@ impl EvaluationStack {
         self.commands.push(CommandAction::Literal(literal.to_string()));
     }
 
-    fn find_free_slot(&mut self) -> i32 {
-        match self.available_slots.pop_front() {
-            Some(slot) => slot,
-            None => {
-                let slot = self.used_slots.len() as i32;
-                self.used_slots.insert(slot);
-                slot
-            }
+    fn create_child(&self) -> Self {
+        Self {
+            objective: self.objective.clone(),
+            available_slots: self.available_slots.clone(),
+            used_slots: self.used_slots.clone(),
+            commands: Vec::new(),
+            stack: self.stack.clone()
         }
+    }
+
+    fn find_free_slot(&mut self) -> i32 {
+        let slot = match self.available_slots.pop_front() {
+            Some(slot) => slot,
+            None => self.used_slots.len() as i32
+        };
+
+        self.used_slots.insert(slot);
+        slot
     }
 
     fn free_slot(&mut self, slot: i32) {
