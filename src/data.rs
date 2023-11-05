@@ -34,14 +34,6 @@ impl ResourceLocation {
         }
     }
 
-    pub fn scoreboard(namespace: String, path: String) -> Self {
-        Self {
-            namespace,
-            path,
-            separator: ' ',
-        }
-    }
-
     pub fn with_separator(&self, separator: char) -> Self {
         Self {
             namespace: self.namespace.clone(),
@@ -54,5 +46,22 @@ impl ResourceLocation {
 impl Display for ResourceLocation {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}{}", self.namespace, self.separator, self.path)
+    }
+}
+
+pub struct ScoreboardSlot {
+    pub objective: String,
+    pub entry: String,
+}
+
+impl ScoreboardSlot {
+    pub fn new(objective: String, entry: String) -> Self {
+        Self { objective, entry }
+    }
+}
+
+impl Display for ScoreboardSlot {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.entry, self.objective)
     }
 }

@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, VecDeque, HashSet}, default, sync::atomic::{AtomicI32, Ordering}, fmt::{Display, Formatter}};
 
-use crate::{data::ResourceLocation, parser::Operation};
+use crate::{data::{ResourceLocation, ScoreboardSlot}, parser::Operation};
 
 use super::{ir::{IrFunction, Instruction}, function::FunctionSignature, type_pool::TypePool};
 
@@ -317,13 +317,13 @@ impl EvaluationStack {
         let return_value = self.stack.pop();
 
         self.commands.push(CommandAction::SetScoreboardEntry {
-            entry: ResourceLocation::scoreboard(self.objective.clone(), "#rf".to_string()),
+            entry: ScoreboardSlot::new(self.objective.clone(), "#rf".to_string()),
             value: 1
         });
 
         if let Some(slot) = return_value {
             self.commands.push(CommandAction::ScoreboardOperation {
-                a: ResourceLocation::scoreboard(self.objective.clone(), "#rv".to_string()),
+                a: ScoreboardSlot::new(self.objective.clone(), "#rv".to_string()),
                 op: ScoreboardOperationType::Set,
                 b: self.slot_location(slot)
             });
@@ -336,7 +336,7 @@ impl EvaluationStack {
 
     fn handle_break(&mut self) {
         self.commands.push(CommandAction::SetScoreboardEntry {
-            entry: ResourceLocation::scoreboard(self.objective.clone(), "#bf".to_string()),
+            entry: ScoreboardSlot::new(self.objective.clone(), "#bf".to_string()),
             value: 1
         });
 
@@ -355,14 +355,14 @@ impl EvaluationStack {
 
         if propagate_return {
             self.commands.push(CommandAction::ExecuteIf {
-                condition: format!("score {} matches 1", ResourceLocation::scoreboard(self.objective.clone(), "#rf".to_string())),
+                condition: format!("score {} matches 1", ScoreboardSlot::new(self.objective.clone(), "#rf".to_string())),
                 run: Box::new(CommandAction::Return)
             })
         }
 
         if *propagate_break {
             self.commands.push(CommandAction::ExecuteIf {
-                condition: format!("score {} matches 1", ResourceLocation::scoreboard(self.objective.clone(), "#bf".to_string())),
+                condition: format!("score {} matches 1", ScoreboardSlot::new(self.objective.clone(), "#bf".to_string())),
                 run: Box::new(CommandAction::Return)
             });
 
@@ -370,7 +370,7 @@ impl EvaluationStack {
                 *propagate_break = false;
 
                 self.commands.push(CommandAction::SetScoreboardEntry {
-                    entry: ResourceLocation::scoreboard(self.objective.clone(), "#bf".to_string()),
+                    entry: ScoreboardSlot::new(self.objective.clone(), "#bf".to_string()),
                     value: 0
                 });
             }
@@ -394,14 +394,14 @@ impl EvaluationStack {
 
         if propagate_return {
             self.commands.push(CommandAction::ExecuteIf {
-                condition: format!("score {} matches 1", ResourceLocation::scoreboard(self.objective.clone(), "#rf".to_string())),
+                condition: format!("score {} matches 1", ScoreboardSlot::new(self.objective.clone(), "#rf".to_string())),
                 run: Box::new(CommandAction::Return)
             })
         }
 
         if *propagate_break {
             self.commands.push(CommandAction::ExecuteIf {
-                condition: format!("score {} matches 1", ResourceLocation::scoreboard(self.objective.clone(), "#bf".to_string())),
+                condition: format!("score {} matches 1", ScoreboardSlot::new(self.objective.clone(), "#bf".to_string())),
                 run: Box::new(CommandAction::Return)
             });
 
@@ -409,7 +409,7 @@ impl EvaluationStack {
                 *propagate_break = false;
 
                 self.commands.push(CommandAction::SetScoreboardEntry {
-                    entry: ResourceLocation::scoreboard(self.objective.clone(), "#bf".to_string()),
+                    entry: ScoreboardSlot::new(self.objective.clone(), "#bf".to_string()),
                     value: 0
                 });
             }
@@ -461,20 +461,20 @@ impl EvaluationStack {
         self.available_slots.push_back(slot);
     }
 
-    fn slot_location(&self, slot: i32) -> ResourceLocation {
-        ResourceLocation::scoreboard(self.objective.clone(), format!("s{}", slot))
+    fn slot_location(&self, slot: i32) -> ScoreboardSlot {
+        ScoreboardSlot::new(self.objective.clone(), format!("s{}", slot))
     }
 
-    fn local_location(&self, local: usize) -> ResourceLocation {
-        ResourceLocation::scoreboard(self.objective.clone(), format!("l{}", local))
+    fn local_location(&self, local: usize) -> ScoreboardSlot {
+        ScoreboardSlot::new(self.objective.clone(), format!("l{}", local))
     }
 
-    fn parameter_location(&self, function: &ResourceLocation, idx: usize) -> ResourceLocation {
-        ResourceLocation::scoreboard(function.with_separator('_').to_string(), format!("l{}", idx))
+    fn parameter_location(&self, function: &ResourceLocation, idx: usize) -> ScoreboardSlot {
+        ScoreboardSlot::new(function.with_separator('_').to_string(), format!("l{}", idx))
     }
 
-    fn const_location(&self, constant: i32) -> ResourceLocation {
-        ResourceLocation::scoreboard("const".to_string(), format!("c{}", constant))
+    fn const_location(&self, constant: i32) -> ScoreboardSlot {
+        ScoreboardSlot::new("const".to_string(), format!("c{}", constant))
     }
 }
 
@@ -505,13 +505,13 @@ impl CompiledFunction {
 
 enum CommandAction {
     SetScoreboardEntry {
-        entry: ResourceLocation,
+        entry: ScoreboardSlot,
         value: i32,
     },
     ScoreboardOperation {
         op: ScoreboardOperationType,
-        a: ResourceLocation,
-        b: ResourceLocation,
+        a: ScoreboardSlot,
+        b: ScoreboardSlot,
     },
     ExecuteIf {
         condition: String,
@@ -534,7 +534,7 @@ impl Display for CommandAction {
             CommandAction::ExecuteIf { condition, run } => write!(f, "execute if {} run {}", condition, run),
             CommandAction::ExecuteUnless { condition, run } => write!(f, "execute unless {} run {}", condition, run),
             CommandAction::Call(location) => write!(f, "function {}", location),
-            CommandAction::Return => write!(f, "return"),
+            CommandAction::Return => write!(f, "return 0"),
             CommandAction::Literal(literal) => write!(f, "{}", literal)
         }
     }
