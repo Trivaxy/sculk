@@ -163,7 +163,7 @@ impl EvaluationStack {
 
         self.commands.push(CommandAction::SetScoreboardEntry {
             entry: self.slot_location(slot),
-            value: GreenValue::Number(n)
+            value: n
         });
 
         self.stack.push(slot);
@@ -174,7 +174,7 @@ impl EvaluationStack {
 
         self.commands.push(CommandAction::SetScoreboardEntry {
             entry: self.slot_location(slot),
-            value: GreenValue::Number(if b { 1 } else { 0 })
+            value: if b { 1 } else { 0 }
         });
 
         self.stack.push(slot);
@@ -183,9 +183,10 @@ impl EvaluationStack {
     fn push_local(&mut self, local: usize) {
         let slot = self.find_free_slot();
 
-        self.commands.push(CommandAction::SetScoreboardEntry {
-            entry: self.slot_location(slot),
-            value: GreenValue::ScoreboardEntry(self.local_location(local))
+        self.commands.push(CommandAction::ScoreboardOperation {
+            a: self.slot_location(slot),
+            op: ScoreboardOperationType::Set,
+            b: self.local_location(local)
         });
 
         self.stack.push(slot);
@@ -194,9 +195,10 @@ impl EvaluationStack {
     fn store_local(&mut self, local: usize) {
         let slot = self.stack.pop().unwrap();
 
-        self.commands.push(CommandAction::SetScoreboardEntry {
-            entry: self.local_location(local),
-            value: GreenValue::ScoreboardEntry(self.slot_location(slot))
+        self.commands.push(CommandAction::ScoreboardOperation {
+            a: self.local_location(local),
+            op: ScoreboardOperationType::Set,
+            b: self.slot_location(slot)
         });
 
         self.free_slot(slot);
@@ -245,7 +247,7 @@ impl EvaluationStack {
                 condition,
                 run: Box::new(CommandAction::SetScoreboardEntry {
                     entry: self.slot_location(a),
-                    value: GreenValue::Number(1)
+                    value: 1
                 })
             });
         } else {
@@ -253,7 +255,7 @@ impl EvaluationStack {
                 condition,
                 run: Box::new(CommandAction::SetScoreboardEntry {
                     entry: self.slot_location(a),
-                    value: GreenValue::Number(1)
+                    value: 1
                 })
             });
         }
@@ -281,7 +283,7 @@ impl EvaluationStack {
                     condition: format!("score {} matches 0", self.slot_location(a)),
                     run: Box::new(CommandAction::SetScoreboardEntry {
                         entry: self.slot_location(a),
-                        value: GreenValue::Number(1)
+                        value: 1
                     })
                 });
 
@@ -289,7 +291,7 @@ impl EvaluationStack {
                     condition: format!("score {} matches 1", self.slot_location(a)),
                     run: Box::new(CommandAction::SetScoreboardEntry {
                         entry: self.slot_location(a),
-                        value: GreenValue::Number(0)
+                        value: 0
                     })
                 });
 
@@ -316,13 +318,14 @@ impl EvaluationStack {
 
         self.commands.push(CommandAction::SetScoreboardEntry {
             entry: ResourceLocation::scoreboard(self.objective.clone(), "#rf".to_string()),
-            value: GreenValue::Number(1)
+            value: 1
         });
 
         if let Some(slot) = return_value {
-            self.commands.push(CommandAction::SetScoreboardEntry {
-                entry: ResourceLocation::scoreboard(self.objective.clone(), "#rv".to_string()),
-                value: GreenValue::ScoreboardEntry(self.slot_location(slot))
+            self.commands.push(CommandAction::ScoreboardOperation {
+                a: ResourceLocation::scoreboard(self.objective.clone(), "#rv".to_string()),
+                op: ScoreboardOperationType::Set,
+                b: self.slot_location(slot)
             });
 
             self.free_slot(slot);
@@ -334,7 +337,7 @@ impl EvaluationStack {
     fn handle_break(&mut self) {
         self.commands.push(CommandAction::SetScoreboardEntry {
             entry: ResourceLocation::scoreboard(self.objective.clone(), "#bf".to_string()),
-            value: GreenValue::Number(1)
+            value: 1
         });
 
         self.commands.push(CommandAction::Return);
@@ -368,7 +371,7 @@ impl EvaluationStack {
 
                 self.commands.push(CommandAction::SetScoreboardEntry {
                     entry: ResourceLocation::scoreboard(self.objective.clone(), "#bf".to_string()),
-                    value: GreenValue::Number(0)
+                    value: 0
                 });
             }
         }
@@ -407,7 +410,7 @@ impl EvaluationStack {
 
                 self.commands.push(CommandAction::SetScoreboardEntry {
                     entry: ResourceLocation::scoreboard(self.objective.clone(), "#bf".to_string()),
-                    value: GreenValue::Number(0)
+                    value: 0
                 });
             }
         }
@@ -417,9 +420,10 @@ impl EvaluationStack {
         for i in (0..signature.params().len()).rev() {
             let slot = self.stack.pop().unwrap();
 
-            self.commands.push(CommandAction::SetScoreboardEntry {
-                entry: self.parameter_location(name, i),
-                value: GreenValue::ScoreboardEntry(self.slot_location(slot))
+            self.commands.push(CommandAction::ScoreboardOperation {
+                a: self.parameter_location(name, i),
+                op: ScoreboardOperationType::Set,
+                b: self.slot_location(slot)
             });
 
             self.free_slot(slot);
@@ -502,7 +506,7 @@ impl CompiledFunction {
 enum CommandAction {
     SetScoreboardEntry {
         entry: ResourceLocation,
-        value: GreenValue
+        value: i32,
     },
     ScoreboardOperation {
         op: ScoreboardOperationType,
@@ -557,6 +561,7 @@ enum ScoreboardOperationType {
     Multiply,
     Divide,
     Modulo,
+    Set
     // add the others when i feel like it
 }
 
@@ -568,6 +573,7 @@ impl Display for ScoreboardOperationType {
             ScoreboardOperationType::Multiply => write!(f, "*="),
             ScoreboardOperationType::Divide => write!(f, "/="),
             ScoreboardOperationType::Modulo => write!(f, "%="),
+            ScoreboardOperationType::Set => write!(f, "=")
         }
     }
 }

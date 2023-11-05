@@ -38,7 +38,7 @@ impl ResourceLocation {
         Self {
             namespace,
             path,
-            separator: '.',
+            separator: ' ',
         }
     }
 

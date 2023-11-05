@@ -107,9 +107,15 @@ fn main() {
     for func in final_output {
         let (location, file_content) = func.finalize();
 
-        let path = Path::new("output").join(location.namespace).join(format!("{}.mcfunction", location.path));
-
-        std::fs::write(path, file_content);
+        // Write file_content at output/location.namespace/location.path
+        std::fs::create_dir_all(Path::new("output").join(location.namespace.clone())).unwrap();
+        std::fs::write(
+            Path::new("output")
+                .join(location.namespace)
+                .join(location.path)
+                .with_extension("mcfunction"),
+            file_content,
+        );
     }
 
 }
