@@ -99,10 +99,11 @@ fn main() {
     }
 
     std::fs::write("ir", &s);
-    println!("Wrote IR to file");
+    println!("Dumped IR");
 
     let codegen = CodeGen::new("pack".to_owned(), signatures, types);
     let final_output = codegen.generate(&funcs);
+    let total = final_output.len();
 
     for func in final_output {
         let (location, file_content) = func.finalize();
@@ -117,5 +118,7 @@ fn main() {
             file_content,
         );
     }
+
+    println!("Successfully compiled {} sculk functions into {} mcfunction files", funcs.len(), total);
 
 }

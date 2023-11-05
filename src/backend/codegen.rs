@@ -46,9 +46,6 @@ impl CodeGen {
         while i < ir.len() {
             let instr = &ir[i];
 
-            dbg!(instr);
-            dbg!(&eval_stack.stack, &eval_stack.available_slots, &eval_stack.used_slots);
-
             match instr {
                 Instruction::PushInteger(n) => eval_stack.push_integer(*n),
                 Instruction::PushBoolean(b) => eval_stack.push_boolean(*b),
