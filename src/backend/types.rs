@@ -2,6 +2,7 @@ use std::{cell::Ref, fmt::Display};
 
 use super::type_pool::TypeKey;
 
+/// The definition of a type in Sculk. These will end up inside a TypePool when the program is validated.
 #[derive(Debug, Clone)]
 pub enum SculkType {
     None,
@@ -68,6 +69,7 @@ impl Display for SculkType {
     }
 }
 
+/// The definition of a struct in Sculk.
 #[derive(Debug, Clone)]
 pub struct StructDef {
     name: String,
@@ -124,6 +126,7 @@ impl StructDef {
     }
 }
 
+/// The definition of a struct field in Sculk.
 #[derive(Debug, Clone)]
 pub struct FieldDef {
     name: String,

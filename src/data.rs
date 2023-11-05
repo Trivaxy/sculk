@@ -18,7 +18,7 @@ impl Display for ScoreboardEntry {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ResourceLocation {
     pub namespace: String,
     pub path: String,

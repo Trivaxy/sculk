@@ -1,11 +1,6 @@
 use crate::parser::{JumpInfo, ParserNode};
 
-// Rebranching is a process that:
-// 1. Collapses if..else if..(else?) chains into strictly nested if-else statements
-// 2. Wraps nodes that follow a potentially returning/breaking/continue if-else statement in a control-flow safe block
-//    - For example, "if maybe() { return; } foo();" would be turned into "if maybe() { return; } JUMPSAFE{ foo(); }"
-//    - JUMPSAFE blocks are blocks that are compiled into their own functions and will only be called if the break/return/continue was not run
-
+// Rebranching is a process that collapses if..else if..(else?) chains into strictly nested if-else statements, for easier compilation to IR
 pub fn rebranch(node: &mut ParserNode) {
     match node {
         ParserNode::Program(nodes) => {

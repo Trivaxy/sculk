@@ -1,7 +1,10 @@
 use std::path::Path;
 
 use backend::{ir::IrCompiler, validate::Validator, types::SculkType};
+use data::ResourceLocation;
 use parser::Parser;
+
+use crate::backend::codegen::CodeGen;
 
 mod backend;
 mod data;
@@ -33,7 +36,7 @@ fn main() {
         .iter()
         .for_each(|err| println!("{:#?}", err));
 
-    let mut validator = Validator::new();
+    let mut validator = Validator::new(String::from("pack"));
     validator.validate_program(&parser_output.ast);
 
     let (signatures, types, errs) = validator.dissolve();
@@ -45,7 +48,7 @@ fn main() {
         return;
     }
 
-    let mut ir_compiler = IrCompiler::new(types, signatures);
+    let mut ir_compiler = IrCompiler::new(String::from("pack"), types, signatures);
     ir_compiler.visit_program(parser_output.ast.as_program());
 
     let (signatures, types, funcs) = ir_compiler.dissolve();
@@ -70,20 +73,20 @@ fn main() {
         s.push_str("}\n\n");
     }
 
-    for func in funcs {
+    for func in &funcs {
         s.push_str(
             format!(
                 "fn {}({}) -> {}",
                 func.name(),
                 signatures
-                    .get(func.name())
+                    .get(&ResourceLocation::new(String::from("pack"), func.name().to_owned()))
                     .unwrap()
                     .params()
                     .iter()
                     .map(|p| format!("{}: {}", p.name(), p.param_type()))
                     .collect::<Vec<String>>()
                     .join(", "),
-                signatures.get(func.name()).unwrap().return_type()
+                signatures.get(&ResourceLocation::new(String::from("pack"), func.name().to_owned())).unwrap().return_type()
             )
             .as_str(),
         );
@@ -96,4 +99,17 @@ fn main() {
     }
 
     std::fs::write("ir", &s);
+    println!("Wrote IR to file");
+
+    let codegen = CodeGen::new("pack".to_owned(), signatures, types);
+    let final_output = codegen.generate(&funcs);
+
+    for func in final_output {
+        let (location, file_content) = func.finalize();
+
+        let path = Path::new("output").join(location.namespace).join(format!("{}.mcfunction", location.path));
+
+        std::fs::write(path, file_content);
+    }
+
 }

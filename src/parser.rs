@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::lexer::{Token, TokenStream};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Operation {
     Add,
     Subtract,

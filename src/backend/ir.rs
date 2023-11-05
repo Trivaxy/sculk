@@ -1,12 +1,17 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::parser::{Operation, ParserNode};
+use crate::{parser::{Operation, ParserNode}, data::ResourceLocation};
 
 use super::{function::FunctionSignature, type_pool::TypePool, types::FieldDef};
 
 /// The instructions that make up Sculk's Intermediate Representation (IR).
-/// These are generated during the code generation phase of compilation, and used for optimization and analysis.
-/// In debug compilations the IR is sent straight to the output phase without any optimizing.
+/// These are generated during the IR generation phase of compilation, where the AST is compiled to IR.
+/// If compiled in release, the IR is analyzed and optimized before being sent to the output phase.
+/// In debug compilations the IR is sent straight to the output phase without any optimization.
+/// 
+/// Sculk's IR is stack-based, and is kept simple intentionally.
+/// At this stage of compilation, information about parameter and local names is lost.
+#[derive(PartialEq)]
 pub enum Instruction {
     PushInteger(i32),
     PushBoolean(bool),
@@ -28,7 +33,7 @@ pub enum Instruction {
     Not,
     Return,
     Break,
-    Call(String),
+    Call(ResourceLocation),
     // Explanation: In Sculk IR any form of control flow happens via jumping in and out of blocks
     // There is no branching/jumping directly into a label/offset since that is hellish to accomplish in Minecraft
     // For example, consider: if x < 5 { broadcast(y); }
@@ -41,15 +46,15 @@ pub enum Instruction {
     //  pushinteger 5
     //  lessthan
     //  jumpinif           // pop a condition off the stack, pop the block off the stack, jump into the block if the condition is true
-    StartBlock,
+    //
+    // The boolean value represents whether or not the block is actually a loop. This is needed to make break statements function properly
+    StartBlock(bool),
     EndBlock,
     JumpInIf,
-    JumpOutIf,
     JumpInEither,
     RepeatIf, // only valid when inside a block. will repeat the block if the condition is true
     EmitCommandLiteral(String),
     AccessField(String),
-    Duplicate,
 }
 
 impl Display for Instruction {
@@ -78,30 +83,30 @@ impl Display for Instruction {
             Return => write!(f, "return"),
             Break => write!(f, "break"),
             Call(name) => write!(f, "call {}", name),
-            StartBlock => write!(f, "startblock"),
+            StartBlock(is_loop) => write!(f, "startblock [loop={}]", is_loop),
             EndBlock => write!(f, "endblock"),
             JumpInIf => write!(f, "jumpinif"),
-            JumpOutIf => write!(f, "jumpoutif"),
             JumpInEither => write!(f, "jumpineither"),
             RepeatIf => write!(f, "repeatif"),
             EmitCommandLiteral(cmd) => write!(f, "emitcommandliteral {}", cmd),
             AccessField(name) => write!(f, "accessfield {}", name),
-            Duplicate => write!(f, "duplicate"),
         }
     }
 }
 
-/// Takes in the validated AST and generates Sculk IR.
+/// Takes in the validated AST, the type pool, function signatures, and compiles every function into Sculk IR.
 pub struct IrCompiler {
+    pack_name: String,
     types: TypePool,
-    func_signatures: HashMap<String, FunctionSignature>,
+    func_signatures: HashMap<ResourceLocation, FunctionSignature>,
     builder: IrFunctionBuilder,
     compiled_funcs: Vec<IrFunction>,
 }
 
 impl IrCompiler {
-    pub fn new(types: TypePool, func_signatures: HashMap<String, FunctionSignature>) -> Self {
+    pub fn new(pack_name: String, types: TypePool, func_signatures: HashMap<ResourceLocation, FunctionSignature>) -> Self {
         Self {
+            pack_name,
             types,
             func_signatures,
             builder: IrFunctionBuilder::new(),
@@ -112,7 +117,7 @@ impl IrCompiler {
     pub fn dissolve(
         self,
     ) -> (
-        HashMap<String, FunctionSignature>,
+        HashMap<ResourceLocation, FunctionSignature>,
         TypePool,
         Vec<IrFunction>,
     ) {
@@ -141,7 +146,7 @@ impl IrCompiler {
 
     // Takes in a function's name and its respective body in the AST, and compiles it into Sculk IR
     fn compile_function(&mut self, name: String, body: &[ParserNode]) -> IrFunction {
-        self.builder.begin(self.func_signatures.get(&name).unwrap());
+        self.builder.begin(self.func_signatures.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap());
 
         for node in body {
             self.visit_node(node);
@@ -244,7 +249,7 @@ impl IrCompiler {
             self.visit_node(arg);
         }
 
-        self.builder.emit(Instruction::Call(name.to_owned()));
+        self.builder.emit(Instruction::Call(ResourceLocation::new(self.pack_name.clone(), name.to_owned())));
     }
 
     fn visit_block(&mut self, body: &[ParserNode]) {
@@ -267,12 +272,12 @@ impl IrCompiler {
         body: &ParserNode,
         else_body: &Option<Box<ParserNode>>,
     ) {
-        self.builder.emit(Instruction::StartBlock);
+        self.builder.emit(Instruction::StartBlock(false));
         self.visit_node(body);
         self.builder.emit(Instruction::EndBlock);
 
         if let Some(else_body) = else_body {
-            self.builder.emit(Instruction::StartBlock);
+            self.builder.emit(Instruction::StartBlock(false));
             self.visit_node(else_body);
             self.builder.emit(Instruction::EndBlock);
         }
@@ -295,7 +300,7 @@ impl IrCompiler {
     ) {
         self.visit_node(init);
 
-        self.builder.emit(Instruction::StartBlock);
+        self.builder.emit(Instruction::StartBlock(true));
 
         self.visit_node(body);
         self.visit_node(step);
@@ -303,6 +308,9 @@ impl IrCompiler {
         self.builder.emit(Instruction::RepeatIf);
 
         self.builder.emit(Instruction::EndBlock);
+
+        self.visit_node(cond);
+        self.builder.emit(Instruction::JumpInIf);
     }
 
     fn op_to_instr(op: Operation) -> Instruction {
@@ -323,6 +331,7 @@ impl IrCompiler {
     }
 }
 
+/// A function that has been compiled into Sculk IR.
 pub struct IrFunction {
     name: String,
     body: Vec<Instruction>,
@@ -345,6 +354,7 @@ impl IrFunction {
     }
 }
 
+/// A helper struct that assists in building Sculk IR functions.
 struct IrFunctionBuilder {
     function: Option<IrFunction>,
     locals: HashMap<String, usize>,

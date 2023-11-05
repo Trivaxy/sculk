@@ -3,7 +3,7 @@ use std::{cell::Cell, collections::HashMap, env::ArgsOs, rc::Rc};
 use crate::{
     backend::type_pool::{TypeKey, TypePool},
     backend::types::{FieldDef, SculkType, StructDef},
-    parser::{Operation, ParserNode},
+    parser::{Operation, ParserNode}, data::ResourceLocation,
 };
 
 use super::function::{FunctionSignature, ParamDef};
@@ -12,7 +12,8 @@ use super::function::{FunctionSignature, ParamDef};
 // In this phase, we perform type checking, make sure statements don't appear illegally (e.g break when not in a loop),
 // and collect struct definitions and function declarations
 pub struct Validator {
-    func_signatures: HashMap<String, FunctionSignature>,
+    pack_name: String,
+    func_signatures: HashMap<ResourceLocation, FunctionSignature>,
     current_return_type: Option<TypeKey>,
     type_pool: TypePool,
     scope_stack: ScopeStack,
@@ -20,8 +21,9 @@ pub struct Validator {
 }
 
 impl Validator {
-    pub fn new() -> Self {
+    pub fn new(pack_name: String) -> Self {
         Self {
+            pack_name,
             func_signatures: HashMap::new(),
             current_return_type: None,
             type_pool: TypePool::new_with_primitives(),
@@ -39,7 +41,7 @@ impl Validator {
     pub fn dissolve(
         self,
     ) -> (
-        HashMap<String, FunctionSignature>,
+        HashMap<ResourceLocation, FunctionSignature>,
         TypePool,
         Vec<ValidationError>,
     ) {
@@ -63,7 +65,7 @@ impl Validator {
             } => {
                 self.scope_stack.push();
 
-                let func_signature = self.func_signatures.get(name).unwrap();
+                let func_signature = self.func_signatures.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap();
 
                 self.current_return_type = Some(func_signature.return_type());
 
@@ -255,7 +257,7 @@ impl Validator {
                 args: arg_nodes,
             } => {
                 let ret_type = match (
-                    self.func_signatures.get(name),
+                    self.func_signatures.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())),
                     self.type_pool.get_type_key(name),
                 ) {
                     (Some(_), Some(_)) => {
@@ -273,7 +275,7 @@ impl Validator {
                 };
 
                 let (expected_types, arg_names): (Vec<TypeKey>, Vec<String>) =
-                    match self.func_signatures.get(name) {
+                    match self.func_signatures.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())) {
                         Some(func) => (
                             func.params()
                                 .iter()
@@ -496,7 +498,7 @@ impl Validator {
                     return_ty: return_ty_str,
                     ..
                 } => {
-                    if self.func_signatures.contains_key(name) {
+                    if self.func_signatures.contains_key(&ResourceLocation::new(self.pack_name.clone(), name.clone())) {
                         self.errors
                             .add(ValidationError::FunctionAlreadyDefined(name.clone()));
                         continue;
@@ -545,7 +547,7 @@ impl Validator {
 
                     let func_signature = FunctionSignature::new(name.clone(), params, return_type);
 
-                    self.func_signatures.insert(name.clone(), func_signature);
+                    self.func_signatures.insert(ResourceLocation::new(self.pack_name.clone(), name.clone()), func_signature);
                 }
                 _ => unreachable!(),
             }

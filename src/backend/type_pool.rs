@@ -9,6 +9,10 @@ use crate::backend::types::SculkType;
 
 type InternalTypeStorage = Rc<RefCell<Vec<SculkType>>>;
 
+/// The collection of all types in a Sculk program, including built-in types.
+/// This is constructed during the validation phase and used throughout compilation.
+/// 
+/// Accessing a TypePool is done through a TypeKey.
 #[derive(Debug)]
 pub struct TypePool {
     type_map: HashMap<String, usize>,
@@ -96,6 +100,7 @@ impl Iterator for TypePoolIterator {
     }
 }
 
+/// Represents a handle to a Sculk type that lives in a TypePool.
 #[derive(Debug, Clone)]
 pub struct TypeKey {
     pool: InternalTypeStorage,
