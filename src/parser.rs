@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range, process::Output};
 
 use crate::lexer::{Token, TokenStream};
 
@@ -17,37 +17,6 @@ pub enum Operation {
     NotEquals,
     Not,
     Negate,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct JumpInfo {
-    pub may_return: bool,
-    pub may_break: bool,
-}
-
-impl JumpInfo {
-    pub fn no_jumps() -> Self {
-        Self {
-            may_return: false,
-            may_break: false,
-        }
-    }
-
-    pub fn new(may_return: bool, may_break: bool) -> Self {
-        Self {
-            may_return,
-            may_break,
-        }
-    }
-
-    pub fn may_jump(&self) -> bool {
-        self.may_return || self.may_break
-    }
-
-    pub fn aggregate(&mut self, other: Self) {
-        self.may_return |= other.may_return;
-        self.may_break |= other.may_break;
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -171,6 +140,7 @@ macro_rules! expect_tok {
 pub struct Parser<'a> {
     tokens: TokenStream<'a>,
     errors: Vec<ParseError>,
+    current_node_starts: Vec<usize>
 }
 
 impl<'a> Parser<'a> {
@@ -178,7 +148,16 @@ impl<'a> Parser<'a> {
         Self {
             tokens: TokenStream::new(src),
             errors: Vec::new(),
+            current_node_starts: Vec::new()
         }
+    }
+
+    fn call(&mut self, mut parser: impl FnMut(&mut Parser) -> ParseResult) -> ParseResult {
+        self.current_node_starts.push(self.tokens.peeked_span().start);
+        let result = parser(self);
+
+        let node_span = self.current_node_starts.pop().unwrap()..self.tokens.current_span().end;
+        result
     }
 
     pub fn parse(mut self) -> ParserOutput {
@@ -710,6 +689,10 @@ impl<'a> Parser<'a> {
         &self.errors
     }
 
+    fn ok(&self, node: ParserNode) -> ParseResult {
+
+    }
+
     // try to recover from an error by jumping to the next statement
     fn recover(&mut self) {
         while self.tokens.peek().is_some() {
@@ -754,16 +737,14 @@ type ParseResult = Result<ParserNode, ()>;
 #[derive(Clone, Debug)]
 pub struct ParseError {
     error: String,
-    line: usize,
-    col: usize,
+    span: Range<usize>
 }
 
 impl ParseError {
-    pub fn new(error: impl Into<String>, line: usize, col: usize) -> Self {
+    pub fn new(error: impl Into<String>, span: Range<usize>) -> Self {
         ParseError {
             error: error.into(),
-            line,
-            col,
+            span
         }
     }
 }

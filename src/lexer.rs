@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use logos::{Lexer, Logos};
 
 #[derive(Default)]
@@ -140,6 +142,8 @@ pub struct TokenStream<'a> {
     current: Option<Token<'a>>,
     next: Option<Token<'a>>,
     col: usize,
+    current_span: Range<usize>,
+    next_span: Range<usize>,
 }
 
 impl<'a> TokenStream<'a> {
@@ -147,17 +151,23 @@ impl<'a> TokenStream<'a> {
         let mut lexer = Token::lexer(src);
 
         let next = lexer.next();
+
         Self {
             lexer,
             current: None,
             next,
             col: 0,
+            current_span: 0..0,
+            next_span: lexer.span(),
         }
     }
 
     pub fn next(&mut self) -> Option<&Token> {
         self.current = self.next.take();
+        self.current_span = self.next_span;
+
         self.next = self.lexer.next();
+        self.next_span = self.lexer.span();
 
         self.col = self.lexer.span().start - self.lexer.extras.last_line_idx;
 
@@ -170,6 +180,14 @@ impl<'a> TokenStream<'a> {
 
     pub fn current(&mut self) -> Option<&Token> {
         self.current.as_ref()
+    }
+
+    pub fn current_span(&self) -> Range<usize> {
+        self.current_span
+    }
+
+    pub fn peeked_span(&self) -> Range<usize> {
+        self.next_span
     }
 
     pub fn line(&self) -> usize {
