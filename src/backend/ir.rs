@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::{parser::{Operation, ParserNode}, data::ResourceLocation};
+use crate::{parser::{Operation, ParserNodeKind, ParserNode}, data::ResourceLocation};
 
 use super::{function::FunctionSignature, type_pool::TypePool, types::FieldDef};
 
@@ -128,8 +128,8 @@ impl IrCompiler {
     // In the future this will account for top-level statements as well
     pub fn visit_program(&mut self, program: &[ParserNode]) {
         for node in program {
-            match node {
-                ParserNode::FunctionDeclaration {
+            match node.kind() {
+                ParserNodeKind::FunctionDeclaration {
                     name,
                     args,
                     return_ty,
@@ -138,7 +138,7 @@ impl IrCompiler {
                     let func = self.compile_function(name.to_owned(), body.as_block());
                     self.compiled_funcs.push(func);
                 },
-                ParserNode::StructDefinition { .. } => {} // nothing to be done
+                ParserNodeKind::StructDefinition { .. } => {} // nothing to be done
                 _ => unreachable!(),
             }
         }
@@ -156,37 +156,43 @@ impl IrCompiler {
     }
 
     fn visit_node(&mut self, node: &ParserNode) {
-        match node {
-            ParserNode::NumberLiteral(n) => self.visit_number_literal(*n),
-            ParserNode::BoolLiteral(b) => self.visit_bool_literal(*b),
-            ParserNode::Identifier(name) => self.visit_identifier(name),
-            ParserNode::VariableDeclaration { name, expr, .. } => {
+        match node.kind() {
+            ParserNodeKind::NumberLiteral(n) => self.visit_number_literal(*n),
+            ParserNodeKind::BoolLiteral(b) => self.visit_bool_literal(*b),
+            ParserNodeKind::Identifier(name) => self.visit_identifier(name),
+            ParserNodeKind::VariableDeclaration { name, expr, .. } => {
                 self.visit_variable_store(name, expr)
             }
-            ParserNode::VariableAssignment { name, expr } => self.visit_variable_store(name, expr),
-            ParserNode::Operation(lhs, rhs, op) => self.visit_binary_operation(lhs, rhs, *op),
-            ParserNode::Unary(expr, op) => self.visit_unary_operation(expr, *op),
-            ParserNode::OpEquals { name, expr, op } => self.visit_operation_equals(name, expr, *op),
-            ParserNode::FunctionCall { name, args } => self.visit_function_call(name, args),
-            ParserNode::Block(body) => self.visit_block(body),
-            ParserNode::Return(expr) => self.visit_return(expr),
-            ParserNode::Break => self.builder.emit(Instruction::Break),
-            ParserNode::If {
+            ParserNodeKind::VariableAssignment { name, expr } => self.visit_variable_store(name, expr),
+            ParserNodeKind::Expression(expr) => self.visit_node(expr),
+            ParserNodeKind::Operation(lhs, rhs, op) => self.visit_binary_operation(lhs, rhs, *op),
+            ParserNodeKind::Unary(expr, op) => self.visit_unary_operation(expr, *op),
+            ParserNodeKind::OpEquals { name, expr, op } => self.visit_operation_equals(name, expr, *op),
+            ParserNodeKind::FunctionCall { name, args } => self.visit_function_call(name, args),
+            ParserNodeKind::Block(body) => self.visit_block(body),
+            ParserNodeKind::Return(expr) => self.visit_return(expr),
+            ParserNodeKind::Break => self.builder.emit(Instruction::Break),
+            ParserNodeKind::If {
                 cond,
                 body,
                 else_body,
                 ..
             } => self.visit_if(cond, body, else_body),
-            ParserNode::For {
+            ParserNodeKind::For {
                 init,
                 cond,
                 step,
                 body,
             } => self.visit_for(init, cond, step, body),
-            ParserNode::CommandLiteral(cmd) => self
+            ParserNodeKind::CommandLiteral(cmd) => self
                 .builder
                 .emit(Instruction::EmitCommandLiteral(cmd.to_owned())),
-            _ => {} // the rest of the nodes don't need any work done, they're handled at an earlier stage
+            ParserNodeKind::MemberAccess { expr, member } => todo!(),
+            // the below nodes don't need any work, they've been handled by previous phases of compilation
+            ParserNodeKind::Program(_) => {},
+            ParserNodeKind::TypedIdentifier { .. } => {},
+            ParserNodeKind::FunctionDeclaration { .. } => {},
+            ParserNodeKind::StructDefinition { .. } => {},
         }
     }
 

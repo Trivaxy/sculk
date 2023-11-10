@@ -1,9 +1,9 @@
-use std::{cell::Cell, collections::HashMap, env::ArgsOs, rc::Rc};
+use std::{cell::Cell, collections::HashMap, env::ArgsOs, rc::Rc, ops::Range};
 
 use crate::{
     backend::type_pool::{TypeKey, TypePool},
     backend::types::{FieldDef, SculkType, StructDef},
-    parser::{Operation, ParserNode}, data::ResourceLocation,
+    parser::{Operation, ParserNodeKind, ParserNode}, data::ResourceLocation,
 };
 
 use super::function::{FunctionSignature, ParamDef};
@@ -49,15 +49,15 @@ impl Validator {
     }
 
     fn visit_node(&mut self, node: &ParserNode) -> TypeKey {
-        match node {
-            ParserNode::Program(nodes) => {
+        match node.kind() {
+            ParserNodeKind::Program(nodes) => {
                 for node in nodes {
                     self.visit_node(node);
                 }
 
                 self.type_pool.none()
             }
-            ParserNode::FunctionDeclaration {
+            ParserNodeKind::FunctionDeclaration {
                 name,
                 args,
                 return_ty,
@@ -81,7 +81,7 @@ impl Validator {
 
                 self.type_pool.none()
             }
-            ParserNode::Block(nodes) => {
+            ParserNodeKind::Block(nodes) => {
                 self.scope_stack.push();
 
                 for node in nodes {
@@ -92,7 +92,7 @@ impl Validator {
 
                 self.type_pool.none()
             }
-            ParserNode::If {
+            ParserNodeKind::If {
                 cond,
                 body,
                 else_ifs,
@@ -103,7 +103,7 @@ impl Validator {
 
                 if cond_type != self.type_pool.bool() {
                     self.errors
-                        .add(ValidationError::ExpectedBoolInIf(cond_type));
+                        .add(ValidationErrorKind::ExpectedBoolInIf(cond_type), cond.span());
                 }
 
                 self.scope_stack.push();
@@ -115,7 +115,7 @@ impl Validator {
 
                     if cond_type != self.type_pool.bool() {
                         self.errors
-                            .add(ValidationError::ExpectedBoolInIf(cond_type));
+                            .add(ValidationErrorKind::ExpectedBoolInIf(cond_type), cond.span());
                     }
 
                     self.scope_stack.push();
@@ -131,7 +131,7 @@ impl Validator {
 
                 self.type_pool.none()
             }
-            ParserNode::For {
+            ParserNodeKind::For {
                 init,
                 cond,
                 step,
@@ -145,7 +145,7 @@ impl Validator {
 
                 if cond_type != self.type_pool.bool() {
                     self.errors
-                        .add(ValidationError::ExpectedBoolInForCondition(cond_type));
+                        .add(ValidationErrorKind::ExpectedBoolInForCondition(cond_type), cond.span());
                 }
 
                 self.visit_node(step);
@@ -156,33 +156,33 @@ impl Validator {
 
                 self.type_pool.none()
             }
-            ParserNode::Break => {
+            ParserNodeKind::Break => {
                 if !self.scope_stack.is_in_loop() {
-                    self.errors.add(ValidationError::CannotBreakOutsideLoop);
+                    self.errors.add(ValidationErrorKind::CannotBreakOutsideLoop, node.span());
                 }
 
                 self.type_pool.none()
             }
-            ParserNode::NumberLiteral(_) => self.type_pool.int(),
-            ParserNode::BoolLiteral(_) => self.type_pool.bool(),
-            ParserNode::Identifier(ident) => match self.scope_stack.find_variable_type(ident) {
+            ParserNodeKind::NumberLiteral(_) => self.type_pool.int(),
+            ParserNodeKind::BoolLiteral(_) => self.type_pool.bool(),
+            ParserNodeKind::Identifier(ident) => match self.scope_stack.find_variable_type(ident) {
                 Some(ty) => ty,
                 None => {
                     self.errors
-                        .add(ValidationError::UnknownVariable(ident.clone()));
+                        .add(ValidationErrorKind::UnknownVariable(ident.clone()), node.span());
                     self.type_pool.unknown()
                 }
             },
-            ParserNode::TypedIdentifier { .. } => unreachable!(),
-            ParserNode::VariableDeclaration { name, expr, ty } => {
+            ParserNodeKind::TypedIdentifier { .. } => unreachable!(),
+            ParserNodeKind::VariableDeclaration { name, expr, ty } => {
                 if self.scope_stack.variable_exists(name) {
                     self.errors
-                        .add(ValidationError::VariableAlreadyDefined(name.clone()));
+                        .add(ValidationErrorKind::VariableAlreadyDefined(name.clone()), node.span());
                 }
 
                 let specified_type = match ty {
                     Some(ty) => self.type_pool.get_type_key(ty).or_else(|| {
-                        self.errors.add(ValidationError::UnknownType(ty.clone()));
+                        self.errors.add(ValidationErrorKind::UnknownType(ty.clone()), node.span());
                         Some(self.type_pool.unknown())
                     }),
                     None => None,
@@ -193,11 +193,11 @@ impl Validator {
                 if let Some(specified_type) = specified_type {
                     if specified_type != expr_type {
                         self.errors
-                            .add(ValidationError::VariableAssignmentTypeMismatch {
+                            .add(ValidationErrorKind::VariableAssignmentTypeMismatch {
                                 name: name.clone(),
                                 expected: specified_type,
                                 actual: expr_type.clone(),
-                            });
+                            }, node.span());
                     }
                 }
 
@@ -205,54 +205,54 @@ impl Validator {
 
                 self.type_pool.none()
             }
-            ParserNode::VariableAssignment { name, expr } => {
+            ParserNodeKind::VariableAssignment { name, expr } => {
                 let expr_type = self.visit_node(expr);
 
                 match self.scope_stack.find_variable_type(name) {
                     Some(ty) => {
                         if ty != expr_type {
                             self.errors
-                                .add(ValidationError::VariableAssignmentTypeMismatch {
+                                .add(ValidationErrorKind::VariableAssignmentTypeMismatch {
                                     name: name.clone(),
                                     expected: ty,
                                     actual: expr_type,
-                                });
+                                }, node.span());
                         }
                     }
                     None => {
                         self.errors
-                            .add(ValidationError::UnknownVariable(name.clone()));
+                            .add(ValidationErrorKind::UnknownVariable(name.clone()), node.span());
                     }
                 }
 
                 self.type_pool.none()
             }
-            ParserNode::Return(expr) => {
+            ParserNodeKind::Return(expr) => {
                 match self.current_return_type.clone() {
                     Some(expected_type) => {
                         if let Some(return_expr) = expr {
                             let expr_type = self.visit_node(return_expr);
 
                             if expr_type != expected_type {
-                                self.errors.add(ValidationError::ReturnTypeMismatch {
+                                self.errors.add(ValidationErrorKind::ReturnTypeMismatch {
                                     expected: expected_type.clone(),
                                     actual: expr_type,
-                                });
+                                }, node.span());
                             }
                         } else {
                             self.errors
-                                .add(ValidationError::ReturnValueExpected(expected_type.clone()));
+                                .add(ValidationErrorKind::ReturnValueExpected(expected_type.clone()), node.span());
                         }
                     }
                     None => {
                         self.errors
-                            .add(ValidationError::ReturnValueExpected(self.type_pool.none()));
+                            .add(ValidationErrorKind::ReturnValueExpected(self.type_pool.none()), node.span());
                     }
                 }
 
                 self.type_pool.none()
             }
-            ParserNode::FunctionCall {
+            ParserNodeKind::FunctionCall {
                 name,
                 args: arg_nodes,
             } => {
@@ -262,14 +262,14 @@ impl Validator {
                 ) {
                     (Some(_), Some(_)) => {
                         self.errors
-                            .add(ValidationError::AmbiguousCall(name.clone()));
+                            .add(ValidationErrorKind::AmbiguousCall(name.clone()), node.span());
                         return self.type_pool.unknown();
                     }
                     (Some(func), None) => func.return_type(),
                     (None, Some(struct_type)) => struct_type,
                     (None, None) => {
                         self.errors
-                            .add(ValidationError::UnknownFunction(name.clone()));
+                            .add(ValidationErrorKind::UnknownFunction(name.clone()), node.span());
                         return self.type_pool.none();
                     }
                 };
@@ -313,10 +313,10 @@ impl Validator {
                     let missing_count = expected_types.len() - arg_nodes.len();
                     let missing = &arg_names[arg_names.len() - missing_count..];
 
-                    self.errors.add(ValidationError::NotEnoughArguments {
+                    self.errors.add(ValidationErrorKind::NotEnoughArguments {
                         name: name.clone(),
                         missing: missing.into_iter().map(|s| s.to_string()).collect(),
-                    });
+                    }, node.span());
                 }
 
                 for (arg, expected_type) in arg_nodes.iter().zip(expected_types) {
@@ -324,17 +324,18 @@ impl Validator {
 
                     if arg_type != expected_type {
                         self.errors
-                            .add(ValidationError::FunctionCallArgTypeMismatch {
+                            .add(ValidationErrorKind::FunctionCallArgTypeMismatch {
                                 name: name.clone(),
                                 expected: expected_type,
                                 actual: arg_type,
-                            });
+                            }, arg.span());
                     }
                 }
 
                 ret_type
             }
-            ParserNode::Operation(lhs, rhs, op) => {
+            ParserNodeKind::Expression(expr) => self.visit_node(expr),
+            ParserNodeKind::Operation(lhs, rhs, op) => {
                 let lhs_type = self.visit_node(lhs);
                 let rhs_type = self.visit_node(rhs);
 
@@ -347,10 +348,10 @@ impl Validator {
                     | Operation::LessThanOrEquals => {
                         if lhs_type != self.type_pool.int() || rhs_type != self.type_pool.int() {
                             self.errors
-                                .add(ValidationError::ConditionalOperatorTypeMismatch {
+                                .add(ValidationErrorKind::ConditionalOperatorTypeMismatch {
                                     lhs: lhs_type,
                                     rhs: rhs_type,
-                                });
+                                }, node.span());
                         }
 
                         return self.type_pool.bool();
@@ -359,32 +360,32 @@ impl Validator {
                 }
 
                 if lhs_type != rhs_type {
-                    self.errors.add(ValidationError::OperationTypeMismatch {
+                    self.errors.add(ValidationErrorKind::OperationTypeMismatch {
                         lhs: lhs_type.clone(),
                         rhs: rhs_type.clone(),
                         op: *op,
-                    });
+                    }, node.span());
                 }
 
                 if lhs_type != self.type_pool.int() {
-                    self.errors.add(ValidationError::ArithmeticUnsupported {
+                    self.errors.add(ValidationErrorKind::ArithmeticUnsupported {
                         ty: lhs_type.clone(),
-                    })
+                    }, lhs.span())
                 }
 
                 if rhs_type != self.type_pool.int() {
                     self.errors
-                        .add(ValidationError::ArithmeticUnsupported { ty: rhs_type })
+                        .add(ValidationErrorKind::ArithmeticUnsupported { ty: rhs_type }, rhs.span());
                 }
 
                 lhs_type
             }
-            ParserNode::OpEquals { name, expr, .. } => {
+            ParserNodeKind::OpEquals { name, expr, .. } => {
                 let expr_type = self.visit_node(expr);
 
                 if expr_type != self.type_pool.int() {
                     self.errors
-                        .add(ValidationError::ArithmeticUnsupported { ty: expr_type })
+                        .add(ValidationErrorKind::ArithmeticUnsupported { ty: expr_type }, expr.span());
                 }
 
                 match self.scope_stack.find_variable_type(name) {
@@ -393,21 +394,21 @@ impl Validator {
 
                         if ty != self.type_pool.int() {
                             self.errors
-                                .add(ValidationError::ArithmeticUnsupported { ty })
+                                .add(ValidationErrorKind::ArithmeticUnsupported { ty }, node.span());
                         }
                     }
                     None => {
                         self.errors
-                            .add(ValidationError::UnknownVariable(name.clone()));
+                            .add(ValidationErrorKind::UnknownVariable(name.clone()), node.span());
                     }
                 }
 
                 self.type_pool.none()
             }
-            ParserNode::Unary(expr, _) => self.visit_node(expr),
-            ParserNode::CommandLiteral(_) => self.type_pool.none(),
-            ParserNode::StructDefinition { .. } => self.type_pool.none(), // structs are already scanned in advance
-            ParserNode::MemberAccess { .. } => todo!(),
+            ParserNodeKind::Unary(expr, _) => self.visit_node(expr),
+            ParserNodeKind::CommandLiteral(_) => self.type_pool.none(),
+            ParserNodeKind::StructDefinition { .. } => self.type_pool.none(), // structs are already scanned in advance
+            ParserNodeKind::MemberAccess { .. } => todo!(),
         }
     }
 
@@ -415,17 +416,17 @@ impl Validator {
     fn scan_struct_defs(&mut self, nodes: &[ParserNode]) {
         let struct_defs = nodes
             .iter()
-            .filter_map(|node| match node {
-                ParserNode::StructDefinition { name, fields } => Some((name, fields.as_slice())),
+            .filter_map(|node| match node.kind() {
+                ParserNodeKind::StructDefinition { name, fields } => Some((name, fields.as_slice())),
                 _ => None,
             })
             .collect::<Vec<(&String, &[ParserNode])>>();
 
         // first pass to register empty struct definitions
-        for (name, fields) in &struct_defs {
+        for ((name, fields), node) in struct_defs.iter().zip(nodes) {
             if self.type_pool.has_type(name) {
                 self.errors
-                    .add(ValidationError::StructAlreadyDefined(name.to_string()));
+                    .add(ValidationErrorKind::StructAlreadyDefined(name.to_string()), node.span());
                 continue;
             }
 
@@ -452,30 +453,30 @@ impl Validator {
                             .add_field(FieldDef::new(field_name.to_string(), ty))
                         {
                             Ok(_) => {}
-                            Err(_) => self.errors.add(ValidationError::StructFieldAlreadyDefined {
+                            Err(_) => self.errors.add(ValidationErrorKind::StructFieldAlreadyDefined {
                                 struct_name: name.to_string(),
                                 field_name: field_name.to_string(),
-                            }),
+                            }, field.span()),
                         }
                     }
                     None => self
                         .errors
-                        .add(ValidationError::UnknownType(type_str.to_string())),
+                        .add(ValidationErrorKind::UnknownType(type_str.to_string()), field.span()),
                 }
             }
         }
 
         // third pass to check for self-referencing structs
-        for (name, fields) in struct_defs {
+        for ((name, fields), nodes) in struct_defs.into_iter().zip(nodes) {
             let struct_type_key = self.type_pool.get_type_key(name).unwrap();
 
             let struct_type = struct_type_key.get();
             let struct_def = struct_type.as_struct_def();
 
             if struct_def.self_referencing() {
-                self.errors.add(ValidationError::StructSelfReferences(
+                self.errors.add(ValidationErrorKind::StructSelfReferences(
                     struct_def.name().to_string(),
-                ));
+                ), nodes.span());
             }
         }
     }
@@ -484,15 +485,15 @@ impl Validator {
     fn scan_func_defs(&mut self, nodes: &[ParserNode]) {
         let func_defs = nodes
             .iter()
-            .filter(|node| match node {
-                ParserNode::FunctionDeclaration { .. } => true,
+            .filter(|node| match node.kind() {
+                ParserNodeKind::FunctionDeclaration { .. } => true,
                 _ => false,
             })
             .collect::<Vec<&ParserNode>>();
 
         for node in func_defs {
-            match node {
-                ParserNode::FunctionDeclaration {
+            match node.kind() {
+                ParserNodeKind::FunctionDeclaration {
                     name,
                     args,
                     return_ty: return_ty_str,
@@ -500,13 +501,13 @@ impl Validator {
                 } => {
                     if self.func_signatures.contains_key(&ResourceLocation::new(self.pack_name.clone(), name.clone())) {
                         self.errors
-                            .add(ValidationError::FunctionAlreadyDefined(name.clone()));
+                            .add(ValidationErrorKind::FunctionAlreadyDefined(name.clone()), node.span());
                         continue;
                     }
 
                     if self.type_pool.has_type(name) {
                         self.errors
-                            .add(ValidationError::FunctionStructNameClash(name.clone()));
+                            .add(ValidationErrorKind::FunctionStructNameClash(name.clone()), node.span());
                         continue;
                     }
 
@@ -521,7 +522,7 @@ impl Validator {
                             None => {
                                 arg_types.push(self.type_pool.unknown());
                                 self.errors
-                                    .add(ValidationError::UnknownType(arg_type_str.to_string()))
+                                    .add(ValidationErrorKind::UnknownType(arg_type_str.to_string()), arg.span());
                             }
                         }
                     }
@@ -531,7 +532,7 @@ impl Validator {
                             Some(ty) => ty,
                             None => {
                                 self.errors
-                                    .add(ValidationError::UnknownType(return_ty_str.to_string()));
+                                    .add(ValidationErrorKind::UnknownType(return_ty_str.to_string()), node.span());
                                 self.type_pool.none()
                             }
                         },
@@ -556,7 +557,19 @@ impl Validator {
 }
 
 #[derive(Clone, Debug)]
-pub enum ValidationError {
+pub struct ValidationError {
+    kind: ValidationErrorKind,
+    span: Range<usize>,
+}
+
+impl ValidationError {
+    pub fn new(kind: ValidationErrorKind, span: Range<usize>) -> Self {
+        Self { kind, span }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ValidationErrorKind {
     CannotBreakOutsideLoop,
     CannotContinueOutsideLoop,
     ExpectedBoolInIf(TypeKey),
@@ -693,8 +706,8 @@ impl ValidationErrorList {
         Self(Vec::new())
     }
 
-    fn add(&mut self, err: ValidationError) {
-        self.0.push(err);
+    fn add(&mut self, kind: ValidationErrorKind, span: Range<usize>) {
+        self.0.push(ValidationError::new(kind, span));
     }
 
     fn dissolve(self) -> Vec<ValidationError> {

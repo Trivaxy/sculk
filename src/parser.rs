@@ -20,7 +20,27 @@ pub enum Operation {
 }
 
 #[derive(Clone, Debug)]
-pub enum ParserNode {
+pub struct ParserNode {
+    kind: ParserNodeKind,
+    span: Range<usize>,
+}
+
+impl ParserNode {
+    pub fn new(kind: ParserNodeKind, span: Range<usize>) -> Self {
+        Self { kind, span }
+    }
+
+    pub fn kind(&self) -> &ParserNodeKind {
+        &self.kind
+    }
+
+    pub fn span(&self) -> Range<usize> {
+        self.span.clone()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ParserNodeKind {
     Program(Vec<ParserNode>),
     Block(Vec<ParserNode>),
     NumberLiteral(i32),
@@ -50,6 +70,7 @@ pub enum ParserNode {
         name: String,
         args: Vec<ParserNode>,
     },
+    Expression(Box<ParserNode>),
     Operation(Box<ParserNode>, Box<ParserNode>, Operation),
     OpEquals {
         name: String,
@@ -58,14 +79,12 @@ pub enum ParserNode {
     },
     Unary(Box<ParserNode>, Operation),
     If {
-        // see rebranch::rebranch
         cond: Box<ParserNode>,
         body: Box<ParserNode>,
         else_ifs: Vec<(ParserNode, ParserNode)>,
         else_body: Option<Box<ParserNode>>,
     },
     For {
-        // see rebranch::rebranch
         init: Box<ParserNode>,
         cond: Box<ParserNode>,
         step: Box<ParserNode>,
@@ -83,46 +102,56 @@ pub enum ParserNode {
     CommandLiteral(String),
 }
 
+impl ParserNodeKind {
+    fn as_identifier(&self) -> &str {
+        match self {
+            ParserNodeKind::Identifier(name) => &name,
+            ParserNodeKind::TypedIdentifier { name, .. } => &name,
+            _ => panic!("tried to get identifier from non-identifier node"),
+        }
+    }
+}
+
 impl ParserNode {
     pub fn is_num(&self) -> bool {
-        match self {
-            Self::NumberLiteral(_) => true,
+        match self.kind {
+            ParserNodeKind::NumberLiteral(_) => true,
             _ => false,
         }
     }
 
     fn as_num(&self) -> i32 {
-        match self {
-            Self::NumberLiteral(num) => *num,
+        match self.kind {
+            ParserNodeKind::NumberLiteral(num) => num,
             _ => panic!("tried to get number from non-number node"),
         }
     }
 
     pub fn as_identifier(&self) -> &str {
-        match self {
-            Self::Identifier(name) => name,
-            Self::TypedIdentifier { name, .. } => name,
+        match &self.kind {
+            ParserNodeKind::Identifier(name) => &name,
+            ParserNodeKind::TypedIdentifier { name, .. } => &name,
             _ => panic!("tried to get identifier from non-identifier node"),
         }
     }
 
     pub fn as_typed_identifier(&self) -> (&str, &str) {
-        match self {
-            Self::TypedIdentifier { name, ty } => (name, ty),
+        match &self.kind {
+            ParserNodeKind::TypedIdentifier { name, ty } => (&name, &ty),
             _ => panic!("tried to get typed identifier from non-typed identifier node"),
         }
     }
 
     pub fn as_program(&self) -> &[ParserNode] {
-        match self {
-            Self::Program(stmts) => stmts,
+        match &self.kind {
+            ParserNodeKind::Program(stmts) => &stmts,
             _ => panic!("tried to get program from non-program node"),
         }
     }
 
     pub fn as_block(&self) -> &[ParserNode] {
-        match self {
-            Self::Block(stmts) => stmts,
+        match &self.kind {
+            ParserNodeKind::Block(stmts) => &stmts,
             _ => panic!("tried to get block from non-block node"),
         }
     }
@@ -152,24 +181,29 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn call(&mut self, mut parser: impl FnMut(&mut Parser) -> ParseResult) -> ParseResult {
+    fn call(&mut self, mut parser: impl for<'b> FnMut(&'b mut Parser<'a>) -> ParserKindResult) -> ParseResult {
         self.current_node_starts.push(self.tokens.peeked_span().start);
+
         let result = parser(self);
 
         let node_span = self.current_node_starts.pop().unwrap()..self.tokens.current_span().end;
-        result
+
+        match result {
+            Ok(kind) => Ok(ParserNode::new(kind, node_span)),
+            Err(_) => Err(()),
+        }
     }
 
     pub fn parse(mut self) -> ParserOutput {
         let mut nodes = Vec::new();
-
+        
         while self.tokens.peek().is_some() {
             match self.tokens.peek().unwrap() {
-                Token::Fn => match self.parse_func_declaration() {
+                Token::Fn => match self.call(Self::parse_func_declaration) {
                     Ok(stmt) => nodes.push(stmt),
                     Err(_) => continue, // error already logged, continue parsing
                 },
-                Token::Struct => match self.parse_struct_definition() {
+                Token::Struct => match self.call(Self::parse_struct_definition) {
                     Ok(stmt) => nodes.push(stmt),
                     Err(_) => continue, // error already logged, continue parsing
                 },
@@ -180,24 +214,24 @@ impl<'a> Parser<'a> {
             }
         }
 
-        ParserOutput::new(ParserNode::Program(nodes), self.errors)
+        ParserOutput::new(ParserNode::new(ParserNodeKind::Program(nodes), 0..self.tokens.src_len()), self.errors)
     }
 
-    fn parse_block(&mut self) -> ParseResult {
+    fn parse_block(&mut self) -> ParserKindResult {
         expect_tok!(self, Token::LeftBrace, "expected {");
 
         let mut statements = Vec::new();
 
         while self.tokens.peek() != Some(&Token::RightBrace) {
-            statements.push(self.parse_statement()?);
+            statements.push(self.call(Self::parse_statement)?);
         }
 
         expect_tok!(self, Token::RightBrace, "expected }");
 
-        Ok(ParserNode::Block(statements))
+        Ok(ParserNodeKind::Block(statements))
     }
 
-    fn parse_statement_inner(&mut self) -> ParseResult {
+    fn parse_statement_inner(&mut self) -> ParserKindResult {
         match self.tokens.peek() {
             Some(Token::Let) => self.parse_var_declaration(),
             Some(Token::Fn) => self.parse_func_declaration(),
@@ -208,7 +242,7 @@ impl<'a> Parser<'a> {
             Some(Token::Return) => self.parse_return_statement(),
             Some(Token::Break) => self.parse_break_statement(),
             Some(Token::Identifier(_)) => {
-                let ident = self.parse_identifier()?.as_identifier().to_string();
+                let ident = self.call(Self::parse_identifier)?.as_identifier().to_string();
 
                 match self.tokens.peek() {
                     Some(Token::Equals) => self.parse_var_assignment(ident),
@@ -226,16 +260,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_statement(&mut self) -> ParseResult {
+    fn parse_statement(&mut self) -> ParserKindResult {
         let stmt = self.parse_statement_inner()?;
 
         match stmt {
-            ParserNode::For { .. }
-            | ParserNode::If { .. }
-            | ParserNode::FunctionDeclaration { .. }
-            | ParserNode::StructDefinition { .. }
-            | ParserNode::CommandLiteral(_) // command literals are a special case and handle the semicolon themselves
-            | ParserNode::Block(_) => Ok(stmt),
+            ParserNodeKind::For { .. }
+            | ParserNodeKind::If { .. }
+            | ParserNodeKind::FunctionDeclaration { .. }
+            | ParserNodeKind::StructDefinition { .. }
+            | ParserNodeKind::CommandLiteral(_) // command literals are a special case and handle the semicolon themselves
+            | ParserNodeKind::Block(_) => Ok(stmt),
             _ => {
                 expect_tok!(self, Token::Semicolon, "expected ;");
                 Ok(stmt)
@@ -243,22 +277,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_var_declaration(&mut self) -> ParseResult {
+    fn parse_var_declaration(&mut self) -> ParserKindResult {
         expect_tok!(self, Token::Let, "expected let");
 
-        let identifier = self.parse_typed_identifier(true)?;
+        let identifier = self.call(|parser| parser.parse_typed_identifier(true))?;
 
         expect_tok!(self, Token::Equals, "expected =");
 
-        let expr = self.parse_expression()?;
+        let expr = self.call(Self::parse_expression)?;
 
-        match identifier {
-            ParserNode::TypedIdentifier { name, ty } => Ok(ParserNode::VariableDeclaration {
+        match identifier.kind {
+            ParserNodeKind::TypedIdentifier { name, ty } => Ok(ParserNodeKind::VariableDeclaration {
                 name,
                 expr: Box::new(expr),
                 ty: Some(ty),
             }),
-            ParserNode::Identifier(name) => Ok(ParserNode::VariableDeclaration {
+            ParserNodeKind::Identifier(name) => Ok(ParserNodeKind::VariableDeclaration {
                 name,
                 expr: Box::new(expr),
                 ty: None,
@@ -267,33 +301,33 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_var_assignment(&mut self, name: String) -> ParseResult {
+    fn parse_var_assignment(&mut self, name: String) -> ParserKindResult {
         expect_tok!(self, Token::Equals, "expected =");
 
-        let expr = self.parse_expression()?;
+        let expr = self.call(Self::parse_expression)?;
 
-        Ok(ParserNode::VariableAssignment {
+        Ok(ParserNodeKind::VariableAssignment {
             name,
             expr: Box::new(expr),
         })
     }
 
-    fn parse_func_declaration(&mut self) -> ParseResult {
+    fn parse_func_declaration(&mut self) -> ParserKindResult {
         expect_tok!(self, Token::Fn, "expected fn");
 
-        let name = self.parse_identifier()?;
+        let name = self.call(Self::parse_identifier)?;
 
         expect_tok!(self, Token::LeftParens, "expected (");
 
         let mut args = Vec::new();
 
         if self.tokens.peek() != Some(&Token::RightParens) {
-            let arg = self.parse_typed_identifier(false)?;
+            let arg = self.call(|parser| parser.parse_typed_identifier(false))?;
             args.push(arg);
 
             while self.tokens.peek() == Some(&Token::Comma) {
                 self.tokens.next(); // consume the comma
-                let arg = self.parse_typed_identifier(false)?;
+                let arg = self.call(|parser| parser.parse_typed_identifier(false))?;
                 args.push(arg);
             }
         }
@@ -303,17 +337,17 @@ impl<'a> Parser<'a> {
         let return_ty = match self.tokens.peek() {
             Some(Token::Arrow) => {
                 self.tokens.next(); // consume the arrow
-                let return_ty = self.parse_identifier()?;
+                let return_ty = self.call(Self::parse_identifier)?;
                 Some(return_ty.as_identifier().to_string())
             }
             _ => None,
         };
 
-        let body = self.parse_block()?;
+        let body = self.call(Self::parse_block)?;
 
         let name = name.as_identifier().to_string();
 
-        Ok(ParserNode::FunctionDeclaration {
+        Ok(ParserNodeKind::FunctionDeclaration {
             name: name.clone(),
             args,
             return_ty,
@@ -321,49 +355,49 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_return_statement(&mut self) -> ParseResult {
+    fn parse_return_statement(&mut self) -> ParserKindResult {
         expect_tok!(self, Token::Return, "expected return");
 
         let expr = match self.tokens.peek() {
             Some(Token::Semicolon) => None,
-            _ => Some(self.parse_expression()?),
+            _ => Some(self.call(Self::parse_expression)?),
         };
 
-        Ok(ParserNode::Return(expr.map(|expr| Box::new(expr))))
+        Ok(ParserNodeKind::Return(expr.map(|expr| Box::new(expr))))
     }
 
-    fn parse_break_statement(&mut self) -> ParseResult {
+    fn parse_break_statement(&mut self) -> ParserKindResult {
         expect_tok!(self, Token::Break, "expected break");
 
-        Ok(ParserNode::Break)
+        Ok(ParserNodeKind::Break)
     }
 
-    fn parse_func_call(&mut self, name: String) -> ParseResult {
+    fn parse_func_call(&mut self, name: String) -> ParserKindResult {
         expect_tok!(self, Token::LeftParens, "expected (");
 
         let mut args = Vec::new();
 
         if self.tokens.peek() != Some(&Token::RightParens) {
-            let arg = self.parse_expression()?;
+            let arg = self.call(Self::parse_expression)?;
             args.push(arg);
 
             while self.tokens.peek() == Some(&Token::Comma) {
                 self.tokens.next(); // consume the comma
-                let arg = self.parse_expression()?;
+                let arg = self.call(Self::parse_expression)?;
                 args.push(arg);
             }
         }
 
         expect_tok!(self, Token::RightParens, "expected )");
 
-        Ok(ParserNode::FunctionCall { name, args })
+        Ok(ParserNodeKind::FunctionCall { name, args })
     }
 
-    fn parse_if(&mut self) -> ParseResult {
+    fn parse_if(&mut self) -> ParserKindResult {
         expect_tok!(self, Token::If, "expected if");
 
-        let cond = self.parse_expression()?;
-        let body = self.parse_block()?;
+        let cond = self.call(Self::parse_expression)?;
+        let body = self.call(Self::parse_block)?;
 
         let mut else_ifs = Vec::new();
         let mut else_body = None;
@@ -373,17 +407,17 @@ impl<'a> Parser<'a> {
 
             if self.tokens.peek() == Some(&Token::If) {
                 self.tokens.next(); // consume the if
-                let cond = self.parse_expression()?;
-                let body = self.parse_block()?;
+                let cond = self.call(Self::parse_expression)?;
+                let body = self.call(Self::parse_block)?;
 
                 else_ifs.push((cond, body));
             } else {
-                else_body = Some(self.parse_block()?);
+                else_body = Some(self.call(Self::parse_block)?);
                 break;
             }
         }
 
-        Ok(ParserNode::If {
+        Ok(ParserNodeKind::If {
             cond: Box::new(cond),
             body: Box::new(body),
             else_ifs,
@@ -391,15 +425,15 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_for(&mut self) -> ParseResult {
+    fn parse_for(&mut self) -> ParserKindResult {
         expect_tok!(self, Token::For, "expected for");
 
-        let init = self.parse_statement()?;
-        let cond = self.parse_expression_statement()?;
-        let step = self.parse_statement_inner()?;
-        let body = self.parse_block()?;
+        let init = self.call(Self::parse_statement)?;
+        let cond = self.call(Self::parse_expression_statement)?;
+        let step = self.call(Self::parse_statement_inner)?;
+        let body = self.call(Self::parse_block)?;
 
-        Ok(ParserNode::For {
+        Ok(ParserNodeKind::For {
             init: Box::new(init),
             cond: Box::new(cond),
             step: Box::new(step),
@@ -407,46 +441,46 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_expression_statement(&mut self) -> ParseResult {
+    fn parse_expression_statement(&mut self) -> ParserKindResult {
         let expr = self.parse_expression()?;
         expect_tok!(self, Token::Semicolon, "expected ;");
         Ok(expr)
     }
 
-    fn parse_expression(&mut self) -> ParseResult {
+    fn parse_expression(&mut self) -> ParserKindResult {
         self.parse_equality()
     }
 
-    fn parse_number(&mut self) -> ParseResult {
+    fn parse_number(&mut self) -> ParserKindResult {
         let tok = self.tokens.next();
 
         match tok {
-            Some(Token::Number(n)) => Ok(ParserNode::NumberLiteral(*n)),
+            Some(Token::Number(n)) => Ok(ParserNodeKind::NumberLiteral(*n)),
             _ => self.error("expected number"),
         }
     }
 
-    fn parse_bool(&mut self) -> ParseResult {
+    fn parse_bool(&mut self) -> ParserKindResult {
         let tok = self.tokens.next();
 
         match tok {
-            Some(Token::Bool(b)) => Ok(ParserNode::BoolLiteral(*b)),
+            Some(Token::Bool(b)) => Ok(ParserNodeKind::BoolLiteral(*b)),
             _ => self.error("expected bool"),
         }
     }
 
-    fn parse_identifier(&mut self) -> ParseResult {
+    fn parse_identifier(&mut self) -> ParserKindResult {
         let tok = self.tokens.next();
 
         match tok {
             Some(Token::Identifier(identifier)) => {
-                Ok(ParserNode::Identifier(identifier.to_string()))
+                Ok(ParserNodeKind::Identifier(identifier.to_string()))
             }
             _ => self.error("expected identifier"),
         }
     }
 
-    fn parse_primary(&mut self) -> ParseResult {
+    fn parse_primary(&mut self) -> ParserKindResult {
         match self.tokens.peek() {
             Some(Token::Number(_)) => self.parse_number(),
             Some(Token::Bool(_)) => self.parse_bool(),
@@ -462,10 +496,10 @@ impl<'a> Parser<'a> {
             }
             Some(Token::LeftParens) => {
                 self.tokens.next();
-                let expr = self.parse_term();
+                let expr = self.parse_statement()?;
 
                 match self.tokens.next() {
-                    Some(Token::RightParens) => expr,
+                    Some(Token::RightParens) => Ok(expr),
                     _ => self.error("expected ) after expression"),
                 }
             }
@@ -473,7 +507,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_unary(&mut self) -> ParseResult {
+    fn parse_unary(&mut self) -> ParserKindResult {
         let op = match self.tokens.peek() {
             Some(Token::Hyphen) => Operation::Negate,
             Some(Token::Not) => Operation::Not,
@@ -482,14 +516,14 @@ impl<'a> Parser<'a> {
 
         self.tokens.next();
 
-        let expr = self.parse_unary()?;
+        let expr = self.call(Self::parse_unary)?;
 
-        Ok(ParserNode::Unary(Box::new(expr), op))
+        Ok(ParserNodeKind::Unary(Box::new(expr), op))
     }
 
     // does not necessarily parse an equality, but rather an equality or a comparison (and in turn a comparison or a term)
-    fn parse_equality(&mut self) -> ParseResult {
-        let mut expr = self.parse_comparison()?;
+    fn parse_equality(&mut self) -> ParserKindResult {
+        let mut expr = self.call(Self::parse_comparison)?;
 
         while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
@@ -500,17 +534,18 @@ impl<'a> Parser<'a> {
 
             self.tokens.next();
 
-            let comparison = self.parse_comparison()?;
-            expr = ParserNode::Operation(Box::new(expr), Box::new(comparison), op);
+            let comparison = self.call(Self::parse_comparison)?;
+            let span = expr.span().start..comparison.span().end;
+            expr = ParserNode::new(ParserNodeKind::Operation(Box::new(expr), Box::new(comparison), op), span);
         }
 
-        Ok(expr)
+        Ok(ParserNodeKind::Expression(Box::new(expr)))
     }
 
     // does not necessarily parse a comparison, but rather a comparison or a term
     // TODO: stop multiple inequalities in the same expression
-    fn parse_comparison(&mut self) -> ParseResult {
-        let mut expr = self.parse_term()?;
+    fn parse_comparison(&mut self) -> ParserKindResult {
+        let mut expr = self.call(Self::parse_term)?;
 
         while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
@@ -523,15 +558,16 @@ impl<'a> Parser<'a> {
 
             self.tokens.next();
 
-            let term = self.parse_term()?;
-            expr = ParserNode::Operation(Box::new(expr), Box::new(term), op);
+            let term = self.call(Self::parse_term)?;
+            let span = expr.span().start..term.span().end;
+            expr = ParserNode::new(ParserNodeKind::Operation(Box::new(expr), Box::new(term), op), span);
         }
 
-        Ok(expr)
+        Ok(ParserNodeKind::Expression(Box::new(expr)))
     }
 
-    fn parse_term(&mut self) -> ParseResult {
-        let mut expr = self.parse_factor()?;
+    fn parse_term(&mut self) -> ParserKindResult {
+        let mut expr = self.call(Self::parse_factor)?;
 
         while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
@@ -542,15 +578,16 @@ impl<'a> Parser<'a> {
 
             self.tokens.next();
 
-            let term = self.parse_factor()?;
-            expr = ParserNode::Operation(Box::new(expr), Box::new(term), op);
+            let term = self.call(Self::parse_factor)?;
+            let span = expr.span().start..term.span().end;
+            expr = ParserNode::new(ParserNodeKind::Operation(Box::new(expr), Box::new(term), op), span);
         }
 
-        Ok(expr)
+        Ok(ParserNodeKind::Expression(Box::new(expr)))
     }
 
-    fn parse_factor(&mut self) -> ParseResult {
-        let mut expr = self.parse_unary()?;
+    fn parse_factor(&mut self) -> ParserKindResult {
+        let mut expr = self.call(Self::parse_unary)?;
 
         while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
@@ -562,14 +599,15 @@ impl<'a> Parser<'a> {
 
             self.tokens.next();
 
-            let term = self.parse_unary()?;
-            expr = ParserNode::Operation(Box::new(expr), Box::new(term), op);
+            let term = self.call(Self::parse_unary)?;
+            let span = expr.span().start..term.span().end;
+            expr = ParserNode::new(ParserNodeKind::Operation(Box::new(expr), Box::new(term), op), span);
         }
 
-        Ok(expr)
+        Ok(ParserNodeKind::Expression(Box::new(expr)))
     }
 
-    fn parse_op_equals(&mut self, name: String) -> ParseResult {
+    fn parse_op_equals(&mut self, name: String) -> ParserKindResult {
         let op = match self.tokens.next() {
             Some(Token::AddEquals) => Operation::Add,
             Some(Token::SubtractEquals) => Operation::Subtract,
@@ -579,16 +617,16 @@ impl<'a> Parser<'a> {
             _ => unreachable!(),
         };
 
-        let expr = self.parse_expression()?;
+        let expr = self.call(Self::parse_expression)?;
 
-        Ok(ParserNode::OpEquals {
+        Ok(ParserNodeKind::OpEquals {
             name,
             expr: Box::new(expr),
             op,
         })
     }
 
-    fn parse_command_literal(&mut self) -> ParseResult {
+    fn parse_command_literal(&mut self) -> ParserKindResult {
         let remainder = self.tokens.remainder();
         let mut end = 0;
         let mut in_str = false;
@@ -628,17 +666,17 @@ impl<'a> Parser<'a> {
         let literal = remainder[..end].to_string();
         self.tokens.bump(end + 1);
 
-        Ok(ParserNode::CommandLiteral(literal))
+        Ok(ParserNodeKind::CommandLiteral(literal))
     }
 
-    fn parse_typed_identifier(&mut self, ty_optional: bool) -> ParseResult {
+    fn parse_typed_identifier(&mut self, ty_optional: bool) -> ParserKindResult {
         let name = match self.parse_identifier()? {
-            ParserNode::Identifier(identifier) => identifier,
+            ParserNodeKind::Identifier(identifier) => identifier,
             _ => unreachable!(),
         };
 
         if ty_optional && self.tokens.peek() != Some(&Token::Colon) {
-            return Ok(ParserNode::Identifier(name));
+            return Ok(ParserNodeKind::Identifier(name));
         }
 
         expect_tok!(self, Token::Colon, "expected :");
@@ -648,10 +686,10 @@ impl<'a> Parser<'a> {
             _ => return self.error("expected valid type"),
         };
 
-        Ok(ParserNode::TypedIdentifier { name, ty })
+        Ok(ParserNodeKind::TypedIdentifier { name, ty })
     }
 
-    fn parse_struct_definition(&mut self) -> ParseResult {
+    fn parse_struct_definition(&mut self) -> ParserKindResult {
         expect_tok!(self, Token::Struct, "expected struct");
 
         let name = self.parse_identifier()?;
@@ -661,7 +699,7 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
 
         while self.tokens.peek() != Some(&Token::RightBrace) {
-            let field = self.parse_typed_identifier(false)?;
+            let field = self.call(|parser| parser.parse_typed_identifier(true))?;
 
             if self.tokens.peek() != Some(&Token::RightBrace) {
                 expect_tok!(self, Token::Comma, "expected , or }");
@@ -672,14 +710,14 @@ impl<'a> Parser<'a> {
 
         expect_tok!(self, Token::RightBrace, "expected }");
 
-        Ok(ParserNode::StructDefinition {
+        Ok(ParserNodeKind::StructDefinition {
             name: name.as_identifier().to_string(),
             fields,
         })
     }
 
-    fn error(&mut self, error: impl Into<String>) -> ParseResult {
-        let error = ParseError::new(error, self.tokens.line(), self.tokens.col());
+    fn error(&mut self, error: impl Into<String>) -> ParserKindResult {
+        let error = ParseError::new(error, *self.current_node_starts.last().unwrap()..self.tokens.current_span().end);
         self.errors.push(error);
         self.recover();
         Err(())
@@ -687,10 +725,6 @@ impl<'a> Parser<'a> {
 
     pub fn errors(&self) -> &[ParseError] {
         &self.errors
-    }
-
-    fn ok(&self, node: ParserNode) -> ParseResult {
-
     }
 
     // try to recover from an error by jumping to the next statement
@@ -733,6 +767,7 @@ impl FunctionDefinition {
 }
 
 type ParseResult = Result<ParserNode, ()>;
+type ParserKindResult = Result<ParserNodeKind, ()>;
 
 #[derive(Clone, Debug)]
 pub struct ParseError {

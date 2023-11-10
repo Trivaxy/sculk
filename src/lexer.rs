@@ -144,6 +144,7 @@ pub struct TokenStream<'a> {
     col: usize,
     current_span: Range<usize>,
     next_span: Range<usize>,
+    src_len: usize,
 }
 
 impl<'a> TokenStream<'a> {
@@ -153,18 +154,19 @@ impl<'a> TokenStream<'a> {
         let next = lexer.next();
 
         Self {
+            next_span: lexer.span(),
+            current_span: 0..0,
             lexer,
             current: None,
             next,
             col: 0,
-            current_span: 0..0,
-            next_span: lexer.span(),
+            src_len: src.len()
         }
     }
 
     pub fn next(&mut self) -> Option<&Token> {
         self.current = self.next.take();
-        self.current_span = self.next_span;
+        self.current_span = self.next_span.clone();
 
         self.next = self.lexer.next();
         self.next_span = self.lexer.span();
@@ -183,11 +185,11 @@ impl<'a> TokenStream<'a> {
     }
 
     pub fn current_span(&self) -> Range<usize> {
-        self.current_span
+        self.current_span.clone()
     }
 
     pub fn peeked_span(&self) -> Range<usize> {
-        self.next_span
+        self.next_span.clone()
     }
 
     pub fn line(&self) -> usize {
@@ -200,6 +202,10 @@ impl<'a> TokenStream<'a> {
 
     pub fn remainder(&self) -> &'a str {
         self.lexer.remainder()
+    }
+
+    pub fn src_len(&self) -> usize {
+        self.src_len
     }
 
     pub fn bump(&mut self, n: usize) {
