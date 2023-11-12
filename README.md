@@ -4,7 +4,7 @@ A *scripting language* designed to compile into Minecraft datapacks. Far more th
 Sculk has 3 goals, which are to make you...
 - ... never touch a mcfunction file again
 - ... never touch a json file again
-- ... never look back
+- ... forget you were ever writing commands
 
 # Motivation
 Back in Minecraft's early days, commands were nothing more than simple administrative actions players can perform. The syntax was clear and there really wasn't much to it.
