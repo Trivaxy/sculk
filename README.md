@@ -1,5 +1,10 @@
 # Sculk
-Sculk is a scripting language designed to compile into Minecraft datapacks. Far more than just a preprocessor, Sculk is a language that abstracts away the notion of using commands, and instead empowers you to focus purely on your logic and your ideas instead of the implementation details. No more constantly worrying about implementing complicated expressions, scoreboard management, decimal emulation, or dreading the lack of control flow. [Sculk gives it all to you, and more.](https://github.com/Trivaxy/sculk/wiki)
+A *scripting language* designed to compile into Minecraft datapacks. Far more than just a preprocessor, Sculk is a language that abstracts away the notion of using commands, and instead empowers you to focus purely on your logic and your ideas instead of the implementation details. No more constantly worrying about implementing complicated expressions, scoreboard management, decimal emulation, or dreading the lack of control flow. [Sculk gives it all to you, and more.](https://github.com/Trivaxy/sculk/wiki)
+
+Sculk has 3 goals, which are to make you...
+- ... never touch a mcfunction file again
+- ... never touch a json file again
+- ... never look back
 
 # Motivation
 Back in Minecraft's early days, commands were nothing more than simple administrative actions players can perform. The syntax was clear and there really wasn't much to it.
@@ -19,11 +24,6 @@ Many tools were made to try and address these issues ([beet](https://github.com/
 One thing that unites those aforementioned tools is that they place heavy emphasis on compile-time features and reduction of verbosity. This is great, but they expose gritty details such as scoreboards, data storage, etc, and often feel a lot more like a preprocessor or just alternative syntax for commands. They perform well as *build tools* but poorly as *abstractions*. It's not a bad thing, it's simply a design choice, but it's  not what I'm looking for.
 
 Sculk focuses on a different approach: it's a *runtime* language designed to make you *forget* that you're working with commands. It's meant to be and feel like it's executed by the game itself - an answer to the "What if Java Edition had proper scripting?" question. You are given all your familiar high-level language constructs that you know and love unconditionally, freeing up your mind to focus on your ideas and your logic, instead of the implementation details.
-
-In short, Sculk has 3 goals, which are to make you...
-- ... never touch a mcfunction file again
-- ... never touch a json file again
-- ... never look back
 
 # Usage
 
