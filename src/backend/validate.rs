@@ -657,7 +657,6 @@ impl ValidationError {
 #[derive(Clone, Debug)]
 pub enum ValidationErrorKind {
     CannotBreakOutsideLoop,
-    CannotContinueOutsideLoop,
     ExpectedBoolInIf(TypeKey),
     ExpectedBoolInForCondition(TypeKey),
     UnknownVariable(String),
