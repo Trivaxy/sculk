@@ -765,10 +765,6 @@ impl<'a> Parser<'a> {
     fn recover(&mut self) {
         while self.tokens.peek().is_some() {
             match self.tokens.peek().unwrap() {
-                Token::Semicolon => {
-                    self.tokens.next();
-                    return;
-                }
                 Token::Let => return,
                 Token::Struct => return,
                 Token::Fn => return,
