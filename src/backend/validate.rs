@@ -1,9 +1,10 @@
-use std::{cell::Cell, collections::HashMap, env::ArgsOs, rc::Rc, ops::Range};
+use std::{cell::Cell, collections::HashMap, env::ArgsOs, ops::Range, rc::Rc};
 
 use crate::{
     backend::type_pool::{TypeKey, TypePool},
     backend::types::{FieldDef, SculkType, StructDef},
-    parser::{Operation, ParserNodeKind, ParserNode}, data::ResourceLocation,
+    data::ResourceLocation,
+    parser::{Operation, ParserNode, ParserNodeKind},
 };
 
 use super::function::{FunctionSignature, ParamDef};
@@ -32,20 +33,20 @@ impl Validator {
         }
     }
 
-    pub fn validate_program(&mut self, ast: &ParserNode) {
+    pub fn validate_program(mut self, ast: &ParserNode) -> ValidatorOutput {
         self.scan_struct_defs(ast.as_program());
         self.scan_func_defs(ast.as_program());
         self.visit_node(ast);
+
+        self.dissolve()
     }
 
-    pub fn dissolve(
-        self,
-    ) -> (
-        HashMap<ResourceLocation, FunctionSignature>,
-        TypePool,
-        Vec<ValidationError>,
-    ) {
-        (self.func_signatures, self.type_pool, self.errors.dissolve())
+    pub fn dissolve(self) -> ValidatorOutput {
+        ValidatorOutput {
+            signatures: self.func_signatures,
+            types: self.type_pool,
+            errors: self.errors.dissolve(),
+        }
     }
 
     fn visit_node(&mut self, node: &ParserNode) -> TypeKey {
@@ -65,7 +66,10 @@ impl Validator {
             } => {
                 self.scope_stack.push();
 
-                let func_signature = self.func_signatures.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap();
+                let func_signature = self
+                    .func_signatures
+                    .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
+                    .unwrap();
 
                 self.current_return_type = Some(func_signature.return_type());
 
@@ -102,8 +106,10 @@ impl Validator {
                 let cond_type = self.visit_node(cond);
 
                 if cond_type != self.type_pool.bool() {
-                    self.errors
-                        .add(ValidationErrorKind::ExpectedBoolInIf(cond_type), cond.span());
+                    self.errors.add(
+                        ValidationErrorKind::ExpectedBoolInIf(cond_type),
+                        cond.span(),
+                    );
                 }
 
                 self.scope_stack.push();
@@ -114,8 +120,10 @@ impl Validator {
                     let cond_type = self.visit_node(cond);
 
                     if cond_type != self.type_pool.bool() {
-                        self.errors
-                            .add(ValidationErrorKind::ExpectedBoolInIf(cond_type), cond.span());
+                        self.errors.add(
+                            ValidationErrorKind::ExpectedBoolInIf(cond_type),
+                            cond.span(),
+                        );
                     }
 
                     self.scope_stack.push();
@@ -144,8 +152,10 @@ impl Validator {
                 let cond_type = self.visit_node(cond);
 
                 if cond_type != self.type_pool.bool() {
-                    self.errors
-                        .add(ValidationErrorKind::ExpectedBoolInForCondition(cond_type), cond.span());
+                    self.errors.add(
+                        ValidationErrorKind::ExpectedBoolInForCondition(cond_type),
+                        cond.span(),
+                    );
                 }
 
                 self.visit_node(step);
@@ -158,7 +168,8 @@ impl Validator {
             }
             ParserNodeKind::Break => {
                 if !self.scope_stack.is_in_loop() {
-                    self.errors.add(ValidationErrorKind::CannotBreakOutsideLoop, node.span());
+                    self.errors
+                        .add(ValidationErrorKind::CannotBreakOutsideLoop, node.span());
                 }
 
                 self.type_pool.none()
@@ -168,21 +179,26 @@ impl Validator {
             ParserNodeKind::Identifier(ident) => match self.scope_stack.find_variable_type(ident) {
                 Some(ty) => ty,
                 None => {
-                    self.errors
-                        .add(ValidationErrorKind::UnknownVariable(ident.clone()), node.span());
+                    self.errors.add(
+                        ValidationErrorKind::UnknownVariable(ident.clone()),
+                        node.span(),
+                    );
                     self.type_pool.unknown()
                 }
             },
             ParserNodeKind::TypedIdentifier { .. } => unreachable!(),
             ParserNodeKind::VariableDeclaration { name, expr, ty } => {
                 if self.scope_stack.variable_exists(name) {
-                    self.errors
-                        .add(ValidationErrorKind::VariableAlreadyDefined(name.clone()), node.span());
+                    self.errors.add(
+                        ValidationErrorKind::VariableAlreadyDefined(name.clone()),
+                        node.span(),
+                    );
                 }
 
                 let specified_type = match ty {
                     Some(ty) => self.type_pool.get_type_key(ty).or_else(|| {
-                        self.errors.add(ValidationErrorKind::UnknownType(ty.clone()), node.span());
+                        self.errors
+                            .add(ValidationErrorKind::UnknownType(ty.clone()), node.span());
                         Some(self.type_pool.unknown())
                     }),
                     None => None,
@@ -192,12 +208,14 @@ impl Validator {
 
                 if let Some(specified_type) = specified_type {
                     if specified_type != expr_type {
-                        self.errors
-                            .add(ValidationErrorKind::VariableAssignmentTypeMismatch {
+                        self.errors.add(
+                            ValidationErrorKind::VariableAssignmentTypeMismatch {
                                 name: name.clone(),
                                 expected: specified_type,
                                 actual: expr_type.clone(),
-                            }, node.span());
+                            },
+                            node.span(),
+                        );
                     }
                 }
 
@@ -211,17 +229,21 @@ impl Validator {
                 match self.scope_stack.find_variable_type(name) {
                     Some(ty) => {
                         if ty != expr_type {
-                            self.errors
-                                .add(ValidationErrorKind::VariableAssignmentTypeMismatch {
+                            self.errors.add(
+                                ValidationErrorKind::VariableAssignmentTypeMismatch {
                                     name: name.clone(),
                                     expected: ty,
                                     actual: expr_type,
-                                }, node.span());
+                                },
+                                node.span(),
+                            );
                         }
                     }
                     None => {
-                        self.errors
-                            .add(ValidationErrorKind::UnknownVariable(name.clone()), node.span());
+                        self.errors.add(
+                            ValidationErrorKind::UnknownVariable(name.clone()),
+                            node.span(),
+                        );
                     }
                 }
 
@@ -234,19 +256,26 @@ impl Validator {
                             let expr_type = self.visit_node(return_expr);
 
                             if expr_type != expected_type {
-                                self.errors.add(ValidationErrorKind::ReturnTypeMismatch {
-                                    expected: expected_type.clone(),
-                                    actual: expr_type,
-                                }, node.span());
+                                self.errors.add(
+                                    ValidationErrorKind::ReturnTypeMismatch {
+                                        expected: expected_type.clone(),
+                                        actual: expr_type,
+                                    },
+                                    node.span(),
+                                );
                             }
                         } else {
-                            self.errors
-                                .add(ValidationErrorKind::ReturnValueExpected(expected_type.clone()), node.span());
+                            self.errors.add(
+                                ValidationErrorKind::ReturnValueExpected(expected_type.clone()),
+                                node.span(),
+                            );
                         }
                     }
                     None => {
-                        self.errors
-                            .add(ValidationErrorKind::ReturnValueExpected(self.type_pool.none()), node.span());
+                        self.errors.add(
+                            ValidationErrorKind::ReturnValueExpected(self.type_pool.none()),
+                            node.span(),
+                        );
                     }
                 }
 
@@ -257,78 +286,90 @@ impl Validator {
                 args: arg_nodes,
             } => {
                 let ret_type = match (
-                    self.func_signatures.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())),
+                    self.func_signatures
+                        .get(&ResourceLocation::new(self.pack_name.clone(), name.clone())),
                     self.type_pool.get_type_key(name),
                 ) {
                     (Some(_), Some(_)) => {
-                        self.errors
-                            .add(ValidationErrorKind::AmbiguousCall(name.clone()), node.span());
+                        self.errors.add(
+                            ValidationErrorKind::AmbiguousCall(name.clone()),
+                            node.span(),
+                        );
                         return self.type_pool.unknown();
                     }
                     (Some(func), None) => func.return_type(),
                     (None, Some(struct_type)) => struct_type,
                     (None, None) => {
-                        self.errors
-                            .add(ValidationErrorKind::UnknownFunction(name.clone()), node.span());
+                        self.errors.add(
+                            ValidationErrorKind::UnknownFunction(name.clone()),
+                            node.span(),
+                        );
                         return self.type_pool.none();
                     }
                 };
 
-                let (expected_types, arg_names): (Vec<TypeKey>, Vec<String>) =
-                    match self.func_signatures.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())) {
-                        Some(func) => (
-                            func.params()
-                                .iter()
-                                .map(|param| param.param_type())
-                                .collect(),
-                            func.params()
-                                .iter()
-                                .map(|param| param.name().to_owned())
-                                .collect(),
-                        ),
-                        None => {
-                            let struct_def = self.type_pool.get_type_key(name).unwrap();
-                            let struct_def = struct_def.get();
+                let (expected_types, arg_names): (Vec<TypeKey>, Vec<String>) = match self
+                    .func_signatures
+                    .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
+                {
+                    Some(func) => (
+                        func.params()
+                            .iter()
+                            .map(|param| param.param_type())
+                            .collect(),
+                        func.params()
+                            .iter()
+                            .map(|param| param.name().to_owned())
+                            .collect(),
+                    ),
+                    None => {
+                        let struct_def = self.type_pool.get_type_key(name).unwrap();
+                        let struct_def = struct_def.get();
 
-                            if let SculkType::Struct(struct_def) = &*struct_def {
-                                (
-                                    struct_def
-                                        .fields()
-                                        .iter()
-                                        .map(|field| field.field_type().clone())
-                                        .collect(),
-                                    struct_def
-                                        .fields()
-                                        .iter()
-                                        .map(|field| field.name().to_owned())
-                                        .collect(),
-                                )
-                            } else {
-                                unreachable!()
-                            }
+                        if let SculkType::Struct(struct_def) = &*struct_def {
+                            (
+                                struct_def
+                                    .fields()
+                                    .iter()
+                                    .map(|field| field.field_type().clone())
+                                    .collect(),
+                                struct_def
+                                    .fields()
+                                    .iter()
+                                    .map(|field| field.name().to_owned())
+                                    .collect(),
+                            )
+                        } else {
+                            unreachable!()
                         }
-                    };
+                    }
+                };
 
                 if arg_nodes.len() < expected_types.len() {
                     let missing_count = expected_types.len() - arg_nodes.len();
                     let missing = &arg_names[arg_names.len() - missing_count..];
 
-                    self.errors.add(ValidationErrorKind::NotEnoughArguments {
-                        name: name.clone(),
-                        missing: missing.into_iter().map(|s| s.to_string()).collect(),
-                    }, node.span());
+                    self.errors.add(
+                        ValidationErrorKind::NotEnoughArguments {
+                            name: name.clone(),
+                            missing: missing.into_iter().map(|s| s.to_string()).collect(),
+                        },
+                        node.span(),
+                    );
                 }
 
                 for (arg, expected_type) in arg_nodes.iter().zip(expected_types) {
                     let arg_type = self.visit_node(arg);
 
                     if arg_type != expected_type {
-                        self.errors
-                            .add(ValidationErrorKind::FunctionCallArgTypeMismatch {
+                        self.errors.add(
+                            ValidationErrorKind::FunctionCallArgTypeMismatch {
                                 name: name.clone(),
                                 expected: expected_type,
                                 actual: arg_type,
-                            }, arg.span());
+                            },
+                            arg.span(),
+                        );
                     }
                 }
 
@@ -347,11 +388,13 @@ impl Validator {
                     | Operation::GreaterThanOrEquals
                     | Operation::LessThanOrEquals => {
                         if lhs_type != self.type_pool.int() || rhs_type != self.type_pool.int() {
-                            self.errors
-                                .add(ValidationErrorKind::ConditionalOperatorTypeMismatch {
+                            self.errors.add(
+                                ValidationErrorKind::ConditionalOperatorTypeMismatch {
                                     lhs: lhs_type,
                                     rhs: rhs_type,
-                                }, node.span());
+                                },
+                                node.span(),
+                            );
                         }
 
                         return self.type_pool.bool();
@@ -360,22 +403,30 @@ impl Validator {
                 }
 
                 if lhs_type != rhs_type {
-                    self.errors.add(ValidationErrorKind::OperationTypeMismatch {
-                        lhs: lhs_type.clone(),
-                        rhs: rhs_type.clone(),
-                        op: *op,
-                    }, node.span());
+                    self.errors.add(
+                        ValidationErrorKind::OperationTypeMismatch {
+                            lhs: lhs_type.clone(),
+                            rhs: rhs_type.clone(),
+                            op: *op,
+                        },
+                        node.span(),
+                    );
                 }
 
                 if lhs_type != self.type_pool.int() {
-                    self.errors.add(ValidationErrorKind::ArithmeticUnsupported {
-                        ty: lhs_type.clone(),
-                    }, lhs.span())
+                    self.errors.add(
+                        ValidationErrorKind::ArithmeticUnsupported {
+                            ty: lhs_type.clone(),
+                        },
+                        lhs.span(),
+                    )
                 }
 
                 if rhs_type != self.type_pool.int() {
-                    self.errors
-                        .add(ValidationErrorKind::ArithmeticUnsupported { ty: rhs_type }, rhs.span());
+                    self.errors.add(
+                        ValidationErrorKind::ArithmeticUnsupported { ty: rhs_type },
+                        rhs.span(),
+                    );
                 }
 
                 lhs_type
@@ -384,8 +435,10 @@ impl Validator {
                 let expr_type = self.visit_node(expr);
 
                 if expr_type != self.type_pool.int() {
-                    self.errors
-                        .add(ValidationErrorKind::ArithmeticUnsupported { ty: expr_type }, expr.span());
+                    self.errors.add(
+                        ValidationErrorKind::ArithmeticUnsupported { ty: expr_type },
+                        expr.span(),
+                    );
                 }
 
                 match self.scope_stack.find_variable_type(name) {
@@ -393,13 +446,17 @@ impl Validator {
                         let ty = ty;
 
                         if ty != self.type_pool.int() {
-                            self.errors
-                                .add(ValidationErrorKind::ArithmeticUnsupported { ty }, node.span());
+                            self.errors.add(
+                                ValidationErrorKind::ArithmeticUnsupported { ty },
+                                node.span(),
+                            );
                         }
                     }
                     None => {
-                        self.errors
-                            .add(ValidationErrorKind::UnknownVariable(name.clone()), node.span());
+                        self.errors.add(
+                            ValidationErrorKind::UnknownVariable(name.clone()),
+                            node.span(),
+                        );
                     }
                 }
 
@@ -417,7 +474,9 @@ impl Validator {
         let struct_defs = nodes
             .iter()
             .filter_map(|node| match node.kind() {
-                ParserNodeKind::StructDefinition { name, fields } => Some((name, fields.as_slice())),
+                ParserNodeKind::StructDefinition { name, fields } => {
+                    Some((name, fields.as_slice()))
+                }
                 _ => None,
             })
             .collect::<Vec<(&String, &[ParserNode])>>();
@@ -425,8 +484,10 @@ impl Validator {
         // first pass to register empty struct definitions
         for ((name, fields), node) in struct_defs.iter().zip(nodes) {
             if self.type_pool.has_type(name) {
-                self.errors
-                    .add(ValidationErrorKind::StructAlreadyDefined(name.to_string()), node.span());
+                self.errors.add(
+                    ValidationErrorKind::StructAlreadyDefined(name.to_string()),
+                    node.span(),
+                );
                 continue;
             }
 
@@ -453,15 +514,19 @@ impl Validator {
                             .add_field(FieldDef::new(field_name.to_string(), ty))
                         {
                             Ok(_) => {}
-                            Err(_) => self.errors.add(ValidationErrorKind::StructFieldAlreadyDefined {
-                                struct_name: name.to_string(),
-                                field_name: field_name.to_string(),
-                            }, field.span()),
+                            Err(_) => self.errors.add(
+                                ValidationErrorKind::StructFieldAlreadyDefined {
+                                    struct_name: name.to_string(),
+                                    field_name: field_name.to_string(),
+                                },
+                                field.span(),
+                            ),
                         }
                     }
-                    None => self
-                        .errors
-                        .add(ValidationErrorKind::UnknownType(type_str.to_string()), field.span()),
+                    None => self.errors.add(
+                        ValidationErrorKind::UnknownType(type_str.to_string()),
+                        field.span(),
+                    ),
                 }
             }
         }
@@ -474,9 +539,10 @@ impl Validator {
             let struct_def = struct_type.as_struct_def();
 
             if struct_def.self_referencing() {
-                self.errors.add(ValidationErrorKind::StructSelfReferences(
-                    struct_def.name().to_string(),
-                ), nodes.span());
+                self.errors.add(
+                    ValidationErrorKind::StructSelfReferences(struct_def.name().to_string()),
+                    nodes.span(),
+                );
             }
         }
     }
@@ -499,15 +565,22 @@ impl Validator {
                     return_ty: return_ty_str,
                     ..
                 } => {
-                    if self.func_signatures.contains_key(&ResourceLocation::new(self.pack_name.clone(), name.clone())) {
-                        self.errors
-                            .add(ValidationErrorKind::FunctionAlreadyDefined(name.clone()), node.span());
+                    if self
+                        .func_signatures
+                        .contains_key(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
+                    {
+                        self.errors.add(
+                            ValidationErrorKind::FunctionAlreadyDefined(name.clone()),
+                            node.span(),
+                        );
                         continue;
                     }
 
                     if self.type_pool.has_type(name) {
-                        self.errors
-                            .add(ValidationErrorKind::FunctionStructNameClash(name.clone()), node.span());
+                        self.errors.add(
+                            ValidationErrorKind::FunctionStructNameClash(name.clone()),
+                            node.span(),
+                        );
                         continue;
                     }
 
@@ -521,8 +594,10 @@ impl Validator {
                             Some(ty) => arg_types.push(ty),
                             None => {
                                 arg_types.push(self.type_pool.unknown());
-                                self.errors
-                                    .add(ValidationErrorKind::UnknownType(arg_type_str.to_string()), arg.span());
+                                self.errors.add(
+                                    ValidationErrorKind::UnknownType(arg_type_str.to_string()),
+                                    arg.span(),
+                                );
                             }
                         }
                     }
@@ -531,8 +606,10 @@ impl Validator {
                         Some(return_ty_str) => match self.type_pool.get_type_key(return_ty_str) {
                             Some(ty) => ty,
                             None => {
-                                self.errors
-                                    .add(ValidationErrorKind::UnknownType(return_ty_str.to_string()), node.span());
+                                self.errors.add(
+                                    ValidationErrorKind::UnknownType(return_ty_str.to_string()),
+                                    node.span(),
+                                );
                                 self.type_pool.none()
                             }
                         },
@@ -548,7 +625,10 @@ impl Validator {
 
                     let func_signature = FunctionSignature::new(name.clone(), params, return_type);
 
-                    self.func_signatures.insert(ResourceLocation::new(self.pack_name.clone(), name.clone()), func_signature);
+                    self.func_signatures.insert(
+                        ResourceLocation::new(self.pack_name.clone(), name.clone()),
+                        func_signature,
+                    );
                 }
                 _ => unreachable!(),
             }
@@ -556,10 +636,16 @@ impl Validator {
     }
 }
 
+pub struct ValidatorOutput {
+    pub signatures: HashMap<ResourceLocation, FunctionSignature>,
+    pub types: TypePool,
+    pub errors: Vec<ValidationError>,
+}
+
 #[derive(Clone, Debug)]
 pub struct ValidationError {
-    kind: ValidationErrorKind,
-    span: Range<usize>,
+    pub kind: ValidationErrorKind,
+    pub span: Range<usize>,
 }
 
 impl ValidationError {

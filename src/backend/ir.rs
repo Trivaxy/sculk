@@ -1,6 +1,9 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::{parser::{Operation, ParserNodeKind, ParserNode}, data::ResourceLocation};
+use crate::{
+    data::ResourceLocation,
+    parser::{Operation, ParserNode, ParserNodeKind},
+};
 
 use super::{function::FunctionSignature, type_pool::TypePool, types::FieldDef};
 
@@ -8,7 +11,7 @@ use super::{function::FunctionSignature, type_pool::TypePool, types::FieldDef};
 /// These are generated during the IR generation phase of compilation, where the AST is compiled to IR.
 /// If compiled in release, the IR is analyzed and optimized before being sent to the output phase.
 /// In debug compilations the IR is sent straight to the output phase without any optimization.
-/// 
+///
 /// Sculk's IR is stack-based, and is kept simple intentionally.
 /// At this stage of compilation, information about parameter and local names is lost.
 #[derive(Debug, PartialEq)]
@@ -104,7 +107,11 @@ pub struct IrCompiler {
 }
 
 impl IrCompiler {
-    pub fn new(pack_name: String, types: TypePool, func_signatures: HashMap<ResourceLocation, FunctionSignature>) -> Self {
+    pub fn new(
+        pack_name: String,
+        types: TypePool,
+        func_signatures: HashMap<ResourceLocation, FunctionSignature>,
+    ) -> Self {
         Self {
             pack_name,
             types,
@@ -137,7 +144,7 @@ impl IrCompiler {
                 } => {
                     let func = self.compile_function(name.to_owned(), body.as_block());
                     self.compiled_funcs.push(func);
-                },
+                }
                 ParserNodeKind::StructDefinition { .. } => {} // nothing to be done
                 _ => unreachable!(),
             }
@@ -146,7 +153,11 @@ impl IrCompiler {
 
     // Takes in a function's name and its respective body in the AST, and compiles it into Sculk IR
     fn compile_function(&mut self, name: String, body: &[ParserNode]) -> IrFunction {
-        self.builder.begin(self.func_signatures.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap());
+        self.builder.begin(
+            self.func_signatures
+                .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
+                .unwrap(),
+        );
 
         for node in body {
             self.visit_node(node);
@@ -163,11 +174,15 @@ impl IrCompiler {
             ParserNodeKind::VariableDeclaration { name, expr, .. } => {
                 self.visit_variable_store(name, expr)
             }
-            ParserNodeKind::VariableAssignment { name, expr } => self.visit_variable_store(name, expr),
+            ParserNodeKind::VariableAssignment { name, expr } => {
+                self.visit_variable_store(name, expr)
+            }
             ParserNodeKind::Expression(expr) => self.visit_node(expr),
             ParserNodeKind::Operation(lhs, rhs, op) => self.visit_binary_operation(lhs, rhs, *op),
             ParserNodeKind::Unary(expr, op) => self.visit_unary_operation(expr, *op),
-            ParserNodeKind::OpEquals { name, expr, op } => self.visit_operation_equals(name, expr, *op),
+            ParserNodeKind::OpEquals { name, expr, op } => {
+                self.visit_operation_equals(name, expr, *op)
+            }
             ParserNodeKind::FunctionCall { name, args } => self.visit_function_call(name, args),
             ParserNodeKind::Block(body) => self.visit_block(body),
             ParserNodeKind::Return(expr) => self.visit_return(expr),
@@ -189,10 +204,10 @@ impl IrCompiler {
                 .emit(Instruction::EmitCommandLiteral(cmd.to_owned())),
             ParserNodeKind::MemberAccess { expr, member } => todo!(),
             // the below nodes don't need any work, they've been handled by previous phases of compilation
-            ParserNodeKind::Program(_) => {},
-            ParserNodeKind::TypedIdentifier { .. } => {},
-            ParserNodeKind::FunctionDeclaration { .. } => {},
-            ParserNodeKind::StructDefinition { .. } => {},
+            ParserNodeKind::Program(_) => {}
+            ParserNodeKind::TypedIdentifier { .. } => {}
+            ParserNodeKind::FunctionDeclaration { .. } => {}
+            ParserNodeKind::StructDefinition { .. } => {}
         }
     }
 
@@ -255,7 +270,10 @@ impl IrCompiler {
             self.visit_node(arg);
         }
 
-        self.builder.emit(Instruction::Call(ResourceLocation::new(self.pack_name.clone(), name.to_owned())));
+        self.builder.emit(Instruction::Call(ResourceLocation::new(
+            self.pack_name.clone(),
+            name.to_owned(),
+        )));
     }
 
     fn visit_block(&mut self, body: &[ParserNode]) {

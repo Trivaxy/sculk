@@ -133,7 +133,7 @@ pub enum Token<'a> {
     Newline,
 
     #[error]
-    #[regex(r#"[ \t\f]+"#, logos::skip)]
+    #[regex(r#"[ \r\t\f]+"#, logos::skip)]
     Error,
 }
 
@@ -160,7 +160,7 @@ impl<'a> TokenStream<'a> {
             current: None,
             next,
             col: 0,
-            src_len: src.len()
+            src_len: src.len(),
         }
     }
 

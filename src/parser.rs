@@ -169,7 +169,7 @@ macro_rules! expect_tok {
 pub struct Parser<'a> {
     tokens: TokenStream<'a>,
     errors: Vec<ParseError>,
-    current_node_starts: Vec<usize>
+    current_node_starts: Vec<usize>,
 }
 
 impl<'a> Parser<'a> {
@@ -177,12 +177,16 @@ impl<'a> Parser<'a> {
         Self {
             tokens: TokenStream::new(src),
             errors: Vec::new(),
-            current_node_starts: Vec::new()
+            current_node_starts: Vec::new(),
         }
     }
 
-    fn call(&mut self, mut parser: impl for<'b> FnMut(&'b mut Parser<'a>) -> ParserKindResult) -> ParseResult {
-        self.current_node_starts.push(self.tokens.peeked_span().start);
+    fn call(
+        &mut self,
+        mut parser: impl for<'b> FnMut(&'b mut Parser<'a>) -> ParserKindResult,
+    ) -> ParseResult {
+        self.current_node_starts
+            .push(self.tokens.peeked_span().start);
 
         let result = parser(self);
 
@@ -196,7 +200,7 @@ impl<'a> Parser<'a> {
 
     pub fn parse(mut self) -> ParserOutput {
         let mut nodes = Vec::new();
-        
+
         while self.tokens.peek().is_some() {
             match self.tokens.peek().unwrap() {
                 Token::Fn => match self.call(Self::parse_func_declaration) {
@@ -208,13 +212,16 @@ impl<'a> Parser<'a> {
                     Err(_) => continue, // error already logged, continue parsing
                 },
                 _ => {
-                    self.error("unexpected token or symbol");
+                    self.error_at("unexpected token or symbol", self.tokens.peeked_span());
                     continue;
-                },
+                }
             }
         }
 
-        ParserOutput::new(ParserNode::new(ParserNodeKind::Program(nodes), 0..self.tokens.src_len()), self.errors)
+        ParserOutput::new(
+            ParserNode::new(ParserNodeKind::Program(nodes), 0..self.tokens.src_len()),
+            self.errors,
+        )
     }
 
     fn parse_block(&mut self) -> ParserKindResult {
@@ -242,7 +249,10 @@ impl<'a> Parser<'a> {
             Some(Token::Return) => self.parse_return_statement(),
             Some(Token::Break) => self.parse_break_statement(),
             Some(Token::Identifier(_)) => {
-                let ident = self.call(Self::parse_identifier)?.as_identifier().to_string();
+                let ident = self
+                    .call(Self::parse_identifier)?
+                    .as_identifier()
+                    .to_string();
 
                 match self.tokens.peek() {
                     Some(Token::Equals) => self.parse_var_assignment(ident),
@@ -287,11 +297,13 @@ impl<'a> Parser<'a> {
         let expr = self.call(Self::parse_expression)?;
 
         match identifier.kind {
-            ParserNodeKind::TypedIdentifier { name, ty } => Ok(ParserNodeKind::VariableDeclaration {
-                name,
-                expr: Box::new(expr),
-                ty: Some(ty),
-            }),
+            ParserNodeKind::TypedIdentifier { name, ty } => {
+                Ok(ParserNodeKind::VariableDeclaration {
+                    name,
+                    expr: Box::new(expr),
+                    ty: Some(ty),
+                })
+            }
             ParserNodeKind::Identifier(name) => Ok(ParserNodeKind::VariableDeclaration {
                 name,
                 expr: Box::new(expr),
@@ -536,7 +548,10 @@ impl<'a> Parser<'a> {
 
             let comparison = self.call(Self::parse_comparison)?;
             let span = expr.span().start..comparison.span().end;
-            expr = ParserNode::new(ParserNodeKind::Operation(Box::new(expr), Box::new(comparison), op), span);
+            expr = ParserNode::new(
+                ParserNodeKind::Operation(Box::new(expr), Box::new(comparison), op),
+                span,
+            );
         }
 
         Ok(ParserNodeKind::Expression(Box::new(expr)))
@@ -560,7 +575,10 @@ impl<'a> Parser<'a> {
 
             let term = self.call(Self::parse_term)?;
             let span = expr.span().start..term.span().end;
-            expr = ParserNode::new(ParserNodeKind::Operation(Box::new(expr), Box::new(term), op), span);
+            expr = ParserNode::new(
+                ParserNodeKind::Operation(Box::new(expr), Box::new(term), op),
+                span,
+            );
         }
 
         Ok(ParserNodeKind::Expression(Box::new(expr)))
@@ -580,7 +598,10 @@ impl<'a> Parser<'a> {
 
             let term = self.call(Self::parse_factor)?;
             let span = expr.span().start..term.span().end;
-            expr = ParserNode::new(ParserNodeKind::Operation(Box::new(expr), Box::new(term), op), span);
+            expr = ParserNode::new(
+                ParserNodeKind::Operation(Box::new(expr), Box::new(term), op),
+                span,
+            );
         }
 
         Ok(ParserNodeKind::Expression(Box::new(expr)))
@@ -601,7 +622,10 @@ impl<'a> Parser<'a> {
 
             let term = self.call(Self::parse_unary)?;
             let span = expr.span().start..term.span().end;
-            expr = ParserNode::new(ParserNodeKind::Operation(Box::new(expr), Box::new(term), op), span);
+            expr = ParserNode::new(
+                ParserNodeKind::Operation(Box::new(expr), Box::new(term), op),
+                span,
+            );
         }
 
         Ok(ParserNodeKind::Expression(Box::new(expr)))
@@ -717,7 +741,17 @@ impl<'a> Parser<'a> {
     }
 
     fn error(&mut self, error: impl Into<String>) -> ParserKindResult {
-        let error = ParseError::new(error, *self.current_node_starts.last().unwrap()..self.tokens.current_span().end);
+        let error = ParseError::new(
+            error,
+            *self.current_node_starts.last().unwrap()..self.tokens.current_span().end,
+        );
+        self.errors.push(error);
+        self.recover();
+        Err(())
+    }
+
+    fn error_at(&mut self, error: impl Into<String>, span: Range<usize>) -> ParserKindResult {
+        let error = ParseError::new(error, span);
         self.errors.push(error);
         self.recover();
         Err(())
@@ -746,12 +780,12 @@ impl<'a> Parser<'a> {
 
 pub struct ParserOutput {
     pub ast: ParserNode,
-    pub errs: Vec<ParseError>,
+    pub errors: Vec<ParseError>,
 }
 
 impl ParserOutput {
-    fn new(ast: ParserNode, errs: Vec<ParseError>) -> Self {
-        Self { ast, errs }
+    fn new(ast: ParserNode, errors: Vec<ParseError>) -> Self {
+        Self { ast, errors }
     }
 }
 
@@ -771,15 +805,15 @@ type ParserKindResult = Result<ParserNodeKind, ()>;
 
 #[derive(Clone, Debug)]
 pub struct ParseError {
-    error: String,
-    span: Range<usize>
+    pub message: String,
+    pub span: Range<usize>,
 }
 
 impl ParseError {
-    pub fn new(error: impl Into<String>, span: Range<usize>) -> Self {
+    pub fn new(message: impl Into<String>, span: Range<usize>) -> Self {
         ParseError {
-            error: error.into(),
-            span
+            message: message.into(),
+            span,
         }
     }
 }

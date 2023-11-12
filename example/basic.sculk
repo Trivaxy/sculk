@@ -1,0 +1,15 @@
+fn add(a: int, b: int, c: int) -> int {
+    return a () b + c;
+}
+
+fn determinant(a: int, b: int, c: int) -> int {
+    return b * b - 4 * a * c;
+}
+
+fn pow(a: int, b: int) -> int {
+    for let i = 0; i < b; i += 1 {
+        a *= a;
+    }
+
+    return a;
+}

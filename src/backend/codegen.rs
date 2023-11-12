@@ -1,8 +1,20 @@
-use std::{collections::{HashMap, VecDeque, HashSet}, default, sync::atomic::{AtomicI32, Ordering}, fmt::{Display, Formatter}};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    default,
+    fmt::{Display, Formatter},
+    sync::atomic::{AtomicI32, Ordering},
+};
 
-use crate::{data::{ResourceLocation, ScoreboardSlot}, parser::Operation};
+use crate::{
+    data::{ResourceLocation, ScoreboardSlot},
+    parser::Operation,
+};
 
-use super::{ir::{IrFunction, Instruction}, function::FunctionSignature, type_pool::TypePool};
+use super::{
+    function::FunctionSignature,
+    ir::{Instruction, IrFunction},
+    type_pool::TypePool,
+};
 
 static ANON_FUNC_COUNT: AtomicI32 = AtomicI32::new(0);
 
@@ -13,7 +25,11 @@ pub struct CodeGen {
 }
 
 impl CodeGen {
-    pub fn new(pack_name: String, func_signatures: HashMap<ResourceLocation, FunctionSignature>, types: TypePool) -> Self {
+    pub fn new(
+        pack_name: String,
+        func_signatures: HashMap<ResourceLocation, FunctionSignature>,
+        types: TypePool,
+    ) -> Self {
         Self {
             pack_name,
             func_signatures,
@@ -25,18 +41,35 @@ impl CodeGen {
         let mut compiled = Vec::new();
 
         for func in funcs {
-            let mut output = self.compile_instr_sequence(ResourceLocation::new(self.pack_name.clone(), func.name().to_owned()), func.body(), EvaluationStack::new(ResourceLocation::new(self.pack_name.clone(), func.name().to_owned()).with_separator('_').to_string()));
+            let mut output = self.compile_instr_sequence(
+                ResourceLocation::new(self.pack_name.clone(), func.name().to_owned()),
+                func.body(),
+                EvaluationStack::new(
+                    ResourceLocation::new(self.pack_name.clone(), func.name().to_owned())
+                        .with_separator('_')
+                        .to_string(),
+                ),
+            );
             compiled.append(&mut output.0);
         }
 
         compiled
     }
 
-    // Takes a sequence of IR instructions and compiles them into .mcfunctions. 
+    pub fn dissolve(self) -> (HashMap<ResourceLocation, FunctionSignature>, TypePool) {
+        (self.func_signatures, self.types)
+    }
+
+    // Takes a sequence of IR instructions and compiles them into .mcfunctions.
     // The sequence is assumed to either be the body of an IrFunction, or the body of a block (excluding the delimiting startblock/endblock instructions)
     // Returns a tuple containing the compiled functions, and two booleans representing whether the function should propagate a return or break
     // The LAST function in the returned collection is the outermost function/the function's body, and the rest are anonymous functions
-    fn compile_instr_sequence(&self, name: ResourceLocation, ir: &[Instruction], mut eval_stack: EvaluationStack) -> (Vec<CompiledFunction>, bool, bool) {
+    fn compile_instr_sequence(
+        &self,
+        name: ResourceLocation,
+        ir: &[Instruction],
+        mut eval_stack: EvaluationStack,
+    ) -> (Vec<CompiledFunction>, bool, bool) {
         let mut block_stack = Vec::new();
         let mut propagate_return = false;
         let mut propagate_break = false;
@@ -60,7 +93,9 @@ impl CodeGen {
                 Instruction::NotEqual => eval_stack.handle_op(Operation::NotEquals),
                 Instruction::GreaterThan => eval_stack.handle_op(Operation::GreaterThan),
                 Instruction::LessThan => eval_stack.handle_op(Operation::LessThan),
-                Instruction::GreaterThanOrEqual => eval_stack.handle_op(Operation::GreaterThanOrEquals),
+                Instruction::GreaterThanOrEqual => {
+                    eval_stack.handle_op(Operation::GreaterThanOrEquals)
+                }
                 Instruction::LessThanOrEqual => eval_stack.handle_op(Operation::LessThanOrEquals),
                 Instruction::And => todo!(),
                 Instruction::Or => todo!(),
@@ -73,7 +108,9 @@ impl CodeGen {
                     eval_stack.handle_break();
                     propagate_break = true;
                 }
-                Instruction::Call(location) => eval_stack.handle_call(location, self.func_signatures.get(location).unwrap()),
+                Instruction::Call(location) => {
+                    eval_stack.handle_call(location, self.func_signatures.get(location).unwrap())
+                }
                 Instruction::StartBlock(is_loop) => {
                     // Find the index of the delimiting EndBlock instruction
                     let mut end_idx = i + 1;
@@ -100,7 +137,18 @@ impl CodeGen {
                     }
 
                     let block_ir = &ir[i + 1..end_idx];
-                    let compiled_block_info = self.compile_instr_sequence(ResourceLocation::new(name.namespace.clone(), format!("{}{}", name.path, ANON_FUNC_COUNT.fetch_add(1, Ordering::Relaxed))), block_ir, eval_stack.create_child());
+                    let compiled_block_info = self.compile_instr_sequence(
+                        ResourceLocation::new(
+                            name.namespace.clone(),
+                            format!(
+                                "{}{}",
+                                name.path,
+                                ANON_FUNC_COUNT.fetch_add(1, Ordering::Relaxed)
+                            ),
+                        ),
+                        block_ir,
+                        eval_stack.create_child(),
+                    );
 
                     propagate_return |= compiled_block_info.1;
                     propagate_break |= compiled_block_info.2;
@@ -114,14 +162,26 @@ impl CodeGen {
                 Instruction::JumpInIf => {
                     let (is_loop, mut functions) = block_stack.pop().unwrap();
 
-                    eval_stack.handle_jump_in(&functions.last().unwrap(), is_loop, propagate_return, &mut propagate_break);
+                    eval_stack.handle_jump_in(
+                        &functions.last().unwrap(),
+                        is_loop,
+                        propagate_return,
+                        &mut propagate_break,
+                    );
 
                     compiled.append(&mut functions);
                 }
                 Instruction::JumpInEither => {
-                    let (mut false_block, mut true_block) = (block_stack.pop().unwrap(), block_stack.pop().unwrap());
+                    let (mut false_block, mut true_block) =
+                        (block_stack.pop().unwrap(), block_stack.pop().unwrap());
 
-                    eval_stack.handle_jump_in_either(&true_block.1.last().unwrap(), &false_block.1.last().unwrap(), true_block.0 || false_block.0, propagate_return, &mut propagate_break);
+                    eval_stack.handle_jump_in_either(
+                        &true_block.1.last().unwrap(),
+                        &false_block.1.last().unwrap(),
+                        true_block.0 || false_block.0,
+                        propagate_return,
+                        &mut propagate_break,
+                    );
 
                     compiled.append(&mut true_block.1);
                     compiled.append(&mut false_block.1);
@@ -164,7 +224,7 @@ impl EvaluationStack {
 
         self.commands.push(CommandAction::SetScoreboardEntry {
             entry: self.slot_location(slot),
-            value: n
+            value: n,
         });
 
         self.stack.push(slot);
@@ -175,7 +235,7 @@ impl EvaluationStack {
 
         self.commands.push(CommandAction::SetScoreboardEntry {
             entry: self.slot_location(slot),
-            value: if b { 1 } else { 0 }
+            value: if b { 1 } else { 0 },
         });
 
         self.stack.push(slot);
@@ -187,7 +247,7 @@ impl EvaluationStack {
         self.commands.push(CommandAction::ScoreboardOperation {
             a: self.slot_location(slot),
             op: ScoreboardOperationType::Set,
-            b: self.local_location(local)
+            b: self.local_location(local),
         });
 
         self.stack.push(slot);
@@ -199,7 +259,7 @@ impl EvaluationStack {
         self.commands.push(CommandAction::ScoreboardOperation {
             a: self.local_location(local),
             op: ScoreboardOperationType::Set,
-            b: self.slot_location(slot)
+            b: self.slot_location(slot),
         });
 
         self.free_slot(slot);
@@ -237,9 +297,11 @@ impl EvaluationStack {
             Operation::NotEquals => format!("score {} matches 0", self.slot_location(a)),
             Operation::GreaterThan => format!("score {} matches 1..", self.slot_location(a)),
             Operation::LessThan => format!("score {} matches ..-1", self.slot_location(a)),
-            Operation::GreaterThanOrEquals => format!("score {} matches 0..", self.slot_location(a)),
+            Operation::GreaterThanOrEquals => {
+                format!("score {} matches 0..", self.slot_location(a))
+            }
             Operation::LessThanOrEquals => format!("score {} matches ..0", self.slot_location(a)),
-            _ => unreachable!()
+            _ => unreachable!(),
         };
 
         // NotEqual is the only one that needs to be inverted
@@ -248,16 +310,16 @@ impl EvaluationStack {
                 condition,
                 run: Box::new(CommandAction::SetScoreboardEntry {
                     entry: self.slot_location(a),
-                    value: 1
-                })
+                    value: 1,
+                }),
             });
         } else {
             self.commands.push(CommandAction::ExecuteIf {
                 condition,
                 run: Box::new(CommandAction::SetScoreboardEntry {
                     entry: self.slot_location(a),
-                    value: 1
-                })
+                    value: 1,
+                }),
             });
         }
 
@@ -271,7 +333,7 @@ impl EvaluationStack {
             Operation::Multiply => self.handle_arithmetic_op(ScoreboardOperationType::Multiply),
             Operation::Divide => self.handle_arithmetic_op(ScoreboardOperationType::Divide),
             Operation::Modulo => self.handle_arithmetic_op(ScoreboardOperationType::Modulo),
-            Operation::CheckEquals 
+            Operation::CheckEquals
             | Operation::NotEquals
             | Operation::GreaterThan
             | Operation::LessThan
@@ -284,20 +346,20 @@ impl EvaluationStack {
                     condition: format!("score {} matches 0", self.slot_location(a)),
                     run: Box::new(CommandAction::SetScoreboardEntry {
                         entry: self.slot_location(a),
-                        value: 1
-                    })
+                        value: 1,
+                    }),
                 });
 
                 self.commands.push(CommandAction::ExecuteIf {
                     condition: format!("score {} matches 1", self.slot_location(a)),
                     run: Box::new(CommandAction::SetScoreboardEntry {
                         entry: self.slot_location(a),
-                        value: 0
-                    })
+                        value: 0,
+                    }),
                 });
 
                 self.stack.push(a);
-            },
+            }
             Operation::Negate => {
                 let a = self.stack.pop().unwrap();
 
@@ -319,14 +381,14 @@ impl EvaluationStack {
 
         self.commands.push(CommandAction::SetScoreboardEntry {
             entry: ScoreboardSlot::new(self.objective.clone(), "#rf".to_string()),
-            value: 1
+            value: 1,
         });
 
         if let Some(slot) = return_value {
             self.commands.push(CommandAction::ScoreboardOperation {
                 a: ScoreboardSlot::new(self.objective.clone(), "#rv".to_string()),
                 op: ScoreboardOperationType::Set,
-                b: self.slot_location(slot)
+                b: self.slot_location(slot),
             });
 
             self.free_slot(slot);
@@ -338,33 +400,45 @@ impl EvaluationStack {
     fn handle_break(&mut self) {
         self.commands.push(CommandAction::SetScoreboardEntry {
             entry: ScoreboardSlot::new(self.objective.clone(), "#bf".to_string()),
-            value: 1
+            value: 1,
         });
 
         self.commands.push(CommandAction::Return);
     }
 
-    fn handle_jump_in(&mut self, block: &CompiledFunction, is_loop: bool, propagate_return: bool, propagate_break: &mut bool) {
+    fn handle_jump_in(
+        &mut self,
+        block: &CompiledFunction,
+        is_loop: bool,
+        propagate_return: bool,
+        propagate_break: &mut bool,
+    ) {
         let condition = self.stack.pop().unwrap();
 
         self.free_slot(condition);
 
         self.commands.push(CommandAction::ExecuteIf {
             condition: format!("score {} matches 1", self.slot_location(condition)),
-            run: Box::new(CommandAction::Call(block.name.clone()))
+            run: Box::new(CommandAction::Call(block.name.clone())),
         });
 
         if propagate_return {
             self.commands.push(CommandAction::ExecuteIf {
-                condition: format!("score {} matches 1", ScoreboardSlot::new(self.objective.clone(), "#rf".to_string())),
-                run: Box::new(CommandAction::Return)
+                condition: format!(
+                    "score {} matches 1",
+                    ScoreboardSlot::new(self.objective.clone(), "#rf".to_string())
+                ),
+                run: Box::new(CommandAction::Return),
             })
         }
 
         if *propagate_break {
             self.commands.push(CommandAction::ExecuteIf {
-                condition: format!("score {} matches 1", ScoreboardSlot::new(self.objective.clone(), "#bf".to_string())),
-                run: Box::new(CommandAction::Return)
+                condition: format!(
+                    "score {} matches 1",
+                    ScoreboardSlot::new(self.objective.clone(), "#bf".to_string())
+                ),
+                run: Box::new(CommandAction::Return),
             });
 
             if is_loop {
@@ -372,38 +446,51 @@ impl EvaluationStack {
 
                 self.commands.push(CommandAction::SetScoreboardEntry {
                     entry: ScoreboardSlot::new(self.objective.clone(), "#bf".to_string()),
-                    value: 0
+                    value: 0,
                 });
             }
         }
     }
 
-    fn handle_jump_in_either(&mut self, true_block: &CompiledFunction, false_block: &CompiledFunction, is_loop: bool, propagate_return: bool, propagate_break: &mut bool) {
+    fn handle_jump_in_either(
+        &mut self,
+        true_block: &CompiledFunction,
+        false_block: &CompiledFunction,
+        is_loop: bool,
+        propagate_return: bool,
+        propagate_break: &mut bool,
+    ) {
         let condition = self.stack.pop().unwrap();
 
         self.commands.push(CommandAction::ExecuteIf {
             condition: format!("score {} matches 1", self.slot_location(condition)),
-            run: Box::new(CommandAction::Call(true_block.name.clone()))
+            run: Box::new(CommandAction::Call(true_block.name.clone())),
         });
 
         self.commands.push(CommandAction::ExecuteUnless {
             condition: format!("score {} matches 1", self.slot_location(condition)),
-            run: Box::new(CommandAction::Call(false_block.name.clone()))
+            run: Box::new(CommandAction::Call(false_block.name.clone())),
         });
 
         self.free_slot(condition);
 
         if propagate_return {
             self.commands.push(CommandAction::ExecuteIf {
-                condition: format!("score {} matches 1", ScoreboardSlot::new(self.objective.clone(), "#rf".to_string())),
-                run: Box::new(CommandAction::Return)
+                condition: format!(
+                    "score {} matches 1",
+                    ScoreboardSlot::new(self.objective.clone(), "#rf".to_string())
+                ),
+                run: Box::new(CommandAction::Return),
             })
         }
 
         if *propagate_break {
             self.commands.push(CommandAction::ExecuteIf {
-                condition: format!("score {} matches 1", ScoreboardSlot::new(self.objective.clone(), "#bf".to_string())),
-                run: Box::new(CommandAction::Return)
+                condition: format!(
+                    "score {} matches 1",
+                    ScoreboardSlot::new(self.objective.clone(), "#bf".to_string())
+                ),
+                run: Box::new(CommandAction::Return),
             });
 
             if is_loop {
@@ -411,7 +498,7 @@ impl EvaluationStack {
 
                 self.commands.push(CommandAction::SetScoreboardEntry {
                     entry: ScoreboardSlot::new(self.objective.clone(), "#bf".to_string()),
-                    value: 0
+                    value: 0,
                 });
             }
         }
@@ -424,7 +511,7 @@ impl EvaluationStack {
             self.commands.push(CommandAction::ScoreboardOperation {
                 a: self.parameter_location(name, i),
                 op: ScoreboardOperationType::Set,
-                b: self.slot_location(slot)
+                b: self.slot_location(slot),
             });
 
             self.free_slot(slot);
@@ -436,14 +523,15 @@ impl EvaluationStack {
 
         self.commands.push(CommandAction::ExecuteIf {
             condition: format!("score {} matches 1", self.slot_location(condition)),
-            run: Box::new(CommandAction::Call(block.clone()))
+            run: Box::new(CommandAction::Call(block.clone())),
         });
 
         self.free_slot(condition);
     }
 
     fn direct_emit(&mut self, literal: &str) {
-        self.commands.push(CommandAction::Literal(literal.to_string()));
+        self.commands
+            .push(CommandAction::Literal(literal.to_string()));
     }
 
     fn create_child(&self) -> Self {
@@ -452,14 +540,14 @@ impl EvaluationStack {
             available_slots: self.available_slots.clone(),
             used_slots: self.used_slots.clone(),
             commands: Vec::new(),
-            stack: self.stack.clone()
+            stack: self.stack.clone(),
         }
     }
 
     fn find_free_slot(&mut self) -> i32 {
         let slot = match self.available_slots.pop_front() {
             Some(slot) => slot,
-            None => self.used_slots.len() as i32
+            None => self.used_slots.len() as i32,
         };
 
         self.used_slots.insert(slot);
@@ -480,7 +568,10 @@ impl EvaluationStack {
     }
 
     fn parameter_location(&self, function: &ResourceLocation, idx: usize) -> ScoreboardSlot {
-        ScoreboardSlot::new(function.with_separator('_').to_string(), format!("l{}", idx))
+        ScoreboardSlot::new(
+            function.with_separator('_').to_string(),
+            format!("l{}", idx),
+        )
     }
 
     fn const_location(&self, constant: i32) -> ScoreboardSlot {
@@ -490,7 +581,7 @@ impl EvaluationStack {
 
 pub struct CompiledFunction {
     name: ResourceLocation,
-    body: Vec<CommandAction>
+    body: Vec<CommandAction>,
 }
 
 impl CompiledFunction {
@@ -525,42 +616,49 @@ enum CommandAction {
     },
     ExecuteIf {
         condition: String,
-        run: Box<CommandAction>
+        run: Box<CommandAction>,
     },
     ExecuteUnless {
         condition: String,
-        run: Box<CommandAction>
+        run: Box<CommandAction>,
     },
     Call(ResourceLocation),
     Return,
-    Literal(String)
+    Literal(String),
 }
 
 impl Display for CommandAction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            CommandAction::SetScoreboardEntry { entry, value } => write!(f, "scoreboard players set {} {}", entry, value),
-            CommandAction::ScoreboardOperation { op, a, b } => write!(f, "scoreboard players operation {} {} {}", a, op, b),
-            CommandAction::ExecuteIf { condition, run } => write!(f, "execute if {} run {}", condition, run),
-            CommandAction::ExecuteUnless { condition, run } => write!(f, "execute unless {} run {}", condition, run),
+            CommandAction::SetScoreboardEntry { entry, value } => {
+                write!(f, "scoreboard players set {} {}", entry, value)
+            }
+            CommandAction::ScoreboardOperation { op, a, b } => {
+                write!(f, "scoreboard players operation {} {} {}", a, op, b)
+            }
+            CommandAction::ExecuteIf { condition, run } => {
+                write!(f, "execute if {} run {}", condition, run)
+            }
+            CommandAction::ExecuteUnless { condition, run } => {
+                write!(f, "execute unless {} run {}", condition, run)
+            }
             CommandAction::Call(location) => write!(f, "function {}", location),
             CommandAction::Return => write!(f, "return 0"),
-            CommandAction::Literal(literal) => write!(f, "{}", literal)
+            CommandAction::Literal(literal) => write!(f, "{}", literal),
         }
     }
-
 }
 
 enum GreenValue {
     Number(i32),
-    ScoreboardEntry(ResourceLocation)
+    ScoreboardEntry(ResourceLocation),
 }
 
 impl Display for GreenValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             GreenValue::Number(n) => write!(f, "{}", n),
-            GreenValue::ScoreboardEntry(entry) => write!(f, "{}", entry)
+            GreenValue::ScoreboardEntry(entry) => write!(f, "{}", entry),
         }
     }
 }
@@ -571,8 +669,7 @@ enum ScoreboardOperationType {
     Multiply,
     Divide,
     Modulo,
-    Set
-    // add the others when i feel like it
+    Set, // add the others when i feel like it
 }
 
 impl Display for ScoreboardOperationType {
@@ -583,7 +680,7 @@ impl Display for ScoreboardOperationType {
             ScoreboardOperationType::Multiply => write!(f, "*="),
             ScoreboardOperationType::Divide => write!(f, "/="),
             ScoreboardOperationType::Modulo => write!(f, "%="),
-            ScoreboardOperationType::Set => write!(f, "=")
+            ScoreboardOperationType::Set => write!(f, "="),
         }
     }
 }

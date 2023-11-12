@@ -1,92 +1,188 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
-use backend::{ir::IrCompiler, validate::Validator, types::SculkType};
+use backend::{
+    codegen::CompiledFunction,
+    function::FunctionSignature,
+    ir::{IrCompiler, IrFunction},
+    type_pool::TypePool,
+    types::SculkType,
+    validate::{Validator, ValidatorOutput},
+};
 use data::ResourceLocation;
+use error::CompileError;
 use parser::Parser;
 
 use crate::backend::codegen::CodeGen;
 
 mod backend;
 mod data;
+mod error;
 mod lexer;
 mod parser;
 
+#[derive(argh::FromArgs)]
+/// Configuration for the compiler.
+struct Config {
+    /// a list of paths to sculk files that should be compiled
+    #[argh(positional)]
+    files: Vec<String>,
+
+    /// the name of the datapack to generate
+    #[argh(option, short = 'n', default = "String::from(\"pack\")")]
+    pack: String,
+
+    #[argh(switch, short = 'd')]
+    /// dumps sculk's ir to a file for debugging purposes
+    dump_ir: bool,
+}
+
 fn main() {
-    let test = r#"
-    struct BlockPos {
-        x: int,
-        y: int,
-        z: int,
-    }
+    let config: Config = argh::from_env();
 
-    fn is_prime(n: int) -> bool {
-        for let i = 2; i * i <= n; i += 1 {
-            if n % i == 0 { return false; }
-        }
-        /say This is just a test;
-        return true;
-    }
-    "#;
-
-    let parser = Parser::new(test);
-    let parser_output = parser.parse();
-
-    parser_output
-        .errs
-        .iter()
-        .for_each(|err| println!("{:#?}", err));
-
-    let mut validator = Validator::new(String::from("pack"));
-    validator.validate_program(&parser_output.ast);
-
-    let (signatures, types, errs) = validator.dissolve();
-
-    errs.iter().for_each(|err| println!("{:#?}", err));
-
-    if !parser_output.errs.is_empty() || !errs.is_empty() {
-        println!("Errors encountered, refusing to lower to IR");
+    if config.files.is_empty() {
+        println!("no files to compile");
         return;
     }
 
-    let mut ir_compiler = IrCompiler::new(String::from("pack"), types, signatures);
+    let mut errors = Vec::new();
+
+    for file in &config.files {
+        let (info, result) = compile_file(&config, file);
+
+        let compiled_funcs = match result {
+            Ok(funcs) => funcs,
+            Err(errs) => {
+                errors.push((file, errs, info));
+                continue;
+            }
+        };
+
+        for func in compiled_funcs {
+            let (location, file_content) = func.finalize();
+            let namespace_path = Path::new(&config.pack).join(location.namespace.clone());
+
+            if let Err(err) = std::fs::create_dir_all(&namespace_path) {
+                println!("failed to create namespace directory: {}", err);
+                return;
+            }
+
+            if let Err(err) = std::fs::write(
+                namespace_path
+                    .join(location.path)
+                    .with_extension("mcfunction"),
+                file_content,
+            ) {
+                println!("failed to write function file: {}", err);
+                return;
+            }
+        }
+    }
+    
+    for (file, errs, info) in errors {
+        let info = info.expect("info should be present if there are errors");
+        let file_content = match std::fs::read_to_string(file) {
+            Ok(content) => content,
+            Err(err) => {
+                println!("failed to read file: {}", err);
+                return;
+            }
+        };
+
+        for err in errs {
+            error::print_report(file, &file_content, &err, &info.types, &info.signatures);
+        }
+    }
+}
+
+fn compile_file(
+    config: &Config,
+    path: &str,
+) -> (
+    Option<Info>,
+    Result<Vec<CompiledFunction>, Vec<CompileError>>,
+) {
+    let file_content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) => {
+            println!("failed to read file: {}", err);
+            return (None, Err(Vec::new()));
+        }
+    };
+
+    let mut errors = Vec::new();
+
+    let parser = Parser::new(&file_content);
+    let parser_output = parser.parse();
+
+    errors.extend(parser_output.errors.into_iter().map(CompileError::Parse));
+
+    let validator = Validator::new(config.pack.clone());
+    let validator_output = validator.validate_program(&parser_output.ast);
+
+    errors.extend(
+        validator_output
+            .errors
+            .into_iter()
+            .map(CompileError::Validate),
+    );
+
+    if !errors.is_empty() {
+        return (
+            Some(Info {
+                types: validator_output.types,
+                signatures: validator_output.signatures,
+            }),
+            Err(errors),
+        );
+    }
+
+    let mut ir_compiler = IrCompiler::new(
+        config.pack.clone(),
+        validator_output.types,
+        validator_output.signatures,
+    );
     ir_compiler.visit_program(parser_output.ast.as_program());
 
     let (signatures, types, funcs) = ir_compiler.dissolve();
-    let mut s = String::new();
 
-    s.push_str("TYPE POOL\n\n");
-
-    for ty in types.iter() {
-        if !ty.get().is_struct() {
-            continue;
-        }
-
-        let type_ref = ty.get();
-        let def = type_ref.as_struct_def();
-
-        s.push_str(format!("struct {} {{\n", def.name()).as_str());
-
-        for field in def.fields() {
-            s.push_str(format!("    {}: {},\n", field.name(), field.field_type()).as_str());
-        }
-
-        s.push_str("}\n\n");
+    if errors.is_empty() && config.dump_ir {
+        dump_ir(&signatures, &funcs);
     }
 
-    for func in &funcs {
+    let codegen = CodeGen::new(config.pack.clone(), signatures, types);
+    let final_output = codegen.generate(&funcs);
+
+    let (signatures, types) = codegen.dissolve();
+
+    (Some(Info { types, signatures }), Ok(final_output))
+}
+
+fn dump_ir(signatures: &HashMap<ResourceLocation, FunctionSignature>, funcs: &[IrFunction]) {
+    let mut s = String::new();
+
+    for func in funcs {
         s.push_str(
             format!(
                 "fn {}({}) -> {}",
                 func.name(),
                 signatures
-                    .get(&ResourceLocation::new(String::from("pack"), func.name().to_owned()))
+                    .get(&ResourceLocation::new(
+                        String::from("pack"),
+                        func.name().to_owned()
+                    ))
                     .unwrap()
                     .params()
                     .iter()
                     .map(|p| format!("{}: {}", p.name(), p.param_type()))
                     .collect::<Vec<String>>()
                     .join(", "),
-                signatures.get(&ResourceLocation::new(String::from("pack"), func.name().to_owned())).unwrap().return_type()
+                signatures
+                    .get(&ResourceLocation::new(
+                        String::from("pack"),
+                        func.name().to_owned()
+                    ))
+                    .unwrap()
+                    .return_type()
             )
             .as_str(),
         );
@@ -98,27 +194,12 @@ fn main() {
         }
     }
 
-    std::fs::write("ir", &s);
-    println!("Dumped IR");
-
-    let codegen = CodeGen::new("pack".to_owned(), signatures, types);
-    let final_output = codegen.generate(&funcs);
-    let total = final_output.len();
-
-    for func in final_output {
-        let (location, file_content) = func.finalize();
-
-        // Write file_content at output/location.namespace/location.path
-        std::fs::create_dir_all(Path::new("output").join(location.namespace.clone())).unwrap();
-        std::fs::write(
-            Path::new("output")
-                .join(location.namespace)
-                .join(location.path)
-                .with_extension("mcfunction"),
-            file_content,
-        );
+    if let Err(err) = std::fs::write("ir_dump.txt", s) {
+        println!("failed to dump ir: {}", err);
     }
+}
 
-    println!("Successfully compiled {} sculk functions into {} mcfunction files", funcs.len(), total);
-
+struct Info {
+    types: TypePool,
+    signatures: HashMap<ResourceLocation, FunctionSignature>,
 }
