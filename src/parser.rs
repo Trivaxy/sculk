@@ -161,7 +161,7 @@ macro_rules! expect_tok {
     ($parser:expr, $token:pat, $err:expr) => {
         match $parser.tokens.peek() {
             Some($token) => $parser.tokens.next(),
-            _ => return $parser.error($err),
+            _ => return $parser.error_at($err, $parser.tokens.peeked_span()),
         };
     };
 }
