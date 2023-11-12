@@ -1,9 +1,9 @@
 use std::{io, collections::HashMap};
 
-use ariadne::{Report, ReportKind, Label, Color, Source};
+use ariadne::{Report, ReportKind, Label, Color, Source, Fmt};
 
 use crate::{
-    backend::{type_pool::TypePool, validate::ValidationError, function::FunctionSignature},
+    backend::{type_pool::TypePool, validate::{ValidationError, ValidationErrorKind}, function::FunctionSignature},
     parser::ParseError, data::ResourceLocation,
 };
 
@@ -45,9 +45,21 @@ pub fn print_report(
                 .with_label(Label::new((file_name, error.span.clone())).with_color(Color::White));
         }
         CompileError::Validate(error) => {
-            report = report
-                .with_message("Test")
-                .with_label(Label::new((file_name, error.span.clone())).with_color(Color::White));
+            report = match &error.kind {
+                ValidationErrorKind::CannotBreakOutsideLoop => {
+                    report
+                        .with_message("cannot break outside a for, while, or foreach loop".to_string())
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::White))
+                },
+                ValidationErrorKind::ExpectedBoolInIf(ty) => {
+                    report
+                        .with_message(format!("an if statement's condition must be of type '{}'", type_pool.bool().fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, error.span.clone()))
+                            .with_color(Color::Cyan)
+                            .with_message(format!("... but '{}' was given instead", ty.fg(Color::Cyan))))
+                },
+                _ => todo!()
+            }
         }
     }
 
