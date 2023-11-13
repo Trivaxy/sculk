@@ -55,14 +55,14 @@ pub fn print_report(
                     report
                         .with_message(format!("an if statement's condition must be of type '{}'", type_pool.bool().fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone()))
-                            .with_color(Color::Cyan)
+                            .with_color(Color::Red)
                             .with_message(format!("... but '{}' was given instead", ty.fg(Color::Cyan))))
                 }
                 ValidationErrorKind::ExpectedBoolInForCondition(ty) => {
                     report
                         .with_message(format!("a for loop's condition must be of type '{}'", type_pool.bool().fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone()))
-                            .with_color(Color::Cyan)
+                            .with_color(Color::Red)
                             .with_message(format!("... but '{}' was given instead", ty.fg(Color::Cyan))))
                 }
                 ValidationErrorKind::UnknownVariable(_) => {
@@ -89,6 +89,86 @@ pub fn print_report(
                         .with_label(Label::new((file_name, expr_span.clone()))
                             .with_color(Color::Red)
                             .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
+                }
+                ValidationErrorKind::ReturnTypeMismatch { expected, actual, expr_span } => {
+                    report
+                        .with_message(format!("expected a return type of '{}'", expected.fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, expr_span.clone()))
+                            .with_color(Color::Red)
+                            .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
+                }
+                ValidationErrorKind::ReturnValueExpected(expected) => {
+                    report
+                        .with_message(format!("expected a return value of type '{}'", expected.fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::FunctionCallArgTypeMismatch { name, expected, actual, arg_span } => {
+                    report
+                        .with_message(format!("incorrect argument type, the type of parameter '{}' is '{}'", name.fg(Color::Green), expected.fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, arg_span.clone()))
+                            .with_color(Color::Red)
+                            .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
+                }
+                ValidationErrorKind::NotEnoughArguments { name, missing } => {
+                    report
+                        .with_message(format!("not enough arguments"))
+                        .with_label(Label::new((file_name, error.span.clone()))
+                            .with_color(Color::Red)
+                            .with_message(format!("the following parameters are missing: {}", missing.join(", ").fg(Color::Cyan))))
+                }
+                ValidationErrorKind::OperationTypeMismatch { lhs, rhs, op } => {
+                    report
+                        .with_message(format!("cannot apply operator {} to operands of type '{}' and '{}'", op.fg(Color::Yellow), lhs.fg(Color::Cyan), rhs.fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::ComparisonOperatorTypeMismatch { lhs, rhs, op } => {
+                    report
+                        .with_message(format!("comparison operators such as {} can only be applied to numeric operands of the same type", op.fg(Color::Yellow)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                        .with_note(format!("the only numeric types are '{}' and soon '{}'", type_pool.int().fg(Color::Cyan), "fixed".fg(Color::Cyan)))
+                }
+                ValidationErrorKind::ArithmeticUnsupported { ty } => {
+                    report
+                        .with_message(format!("arithmetic operations are not valid for type '{}'", ty.fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::FunctionAlreadyDefined(name) => {
+                    report
+                        .with_message(format!("a function with the name '{}' already exists", name.fg(Color::Green)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::FunctionStructNameClash(name) => {
+                    report
+                        .with_message(format!("clash between a struct and function which share the name '{}'", name.fg(Color::Green)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                        .with_note(format!("this is an error because an expression like '{}{}' would be ambiguous", name.fg(Color::Green), "(...)".fg(Color::Green)))
+                }
+                ValidationErrorKind::StructAlreadyDefined(name) => {
+                    report
+                        .with_message(format!("a struct with the name '{}' already exists", name.fg(Color::Green)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::StructFieldAlreadyDefined { struct_name, field_name } => {
+                    report
+                        .with_message(format!("a field named '{}' already exists within '{}'", field_name.fg(Color::Green), struct_name.fg(Color::Green)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::AmbiguousCall(name) => {
+                    report
+                        .with_message("ambiguous call")
+                        .with_label(Label::new((file_name, error.span.clone()))
+                            .with_color(Color::Red)
+                            .with_message(format!("the name '{}' is shared by a struct and function", name.fg(Color::Green))))
+                }
+                ValidationErrorKind::StructSelfReferences(name) => {
+                    report
+                        .with_message(format!("struct '{}' cannot contain itself either directly or indirectly", name.fg(Color::Green)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::UnknownType(_) => {
+                    report
+                        .with_message("unknown type")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
                 _ => todo!()
             }

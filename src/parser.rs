@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range, process::Output};
+use std::{collections::HashMap, ops::Range, process::Output, fmt::Display};
 
 use crate::lexer::{Token, TokenStream};
 
@@ -17,6 +17,28 @@ pub enum Operation {
     NotEquals,
     Not,
     Negate,
+}
+
+impl Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op = match self {
+            Operation::Add => "+",
+            Operation::Subtract => "-",
+            Operation::Multiply => "*",
+            Operation::Divide => "/",
+            Operation::Modulo => "%",
+            Operation::GreaterThan => ">",
+            Operation::LessThan => "<",
+            Operation::GreaterThanOrEquals => ">=",
+            Operation::LessThanOrEquals => "<=",
+            Operation::CheckEquals => "==",
+            Operation::NotEquals => "!=",
+            Operation::Not => "!",
+            Operation::Negate => "-",
+        };
+
+        write!(f, "{}", op)
+    }
 }
 
 #[derive(Clone, Debug)]

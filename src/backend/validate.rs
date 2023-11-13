@@ -262,6 +262,7 @@ impl Validator {
                                     ValidationErrorKind::ReturnTypeMismatch {
                                         expected: expected_type.clone(),
                                         actual: expr_type,
+                                        expr_span: return_expr.span()
                                     },
                                     node.span(),
                                 );
@@ -360,15 +361,19 @@ impl Validator {
                     );
                 }
 
-                for (arg, expected_type) in arg_nodes.iter().zip(expected_types) {
+                for (i, (arg, expected_type)) in arg_nodes.iter().zip(expected_types).enumerate() {
                     let arg_type = self.visit_node(arg);
 
                     if arg_type != expected_type {
                         self.errors.add(
                             ValidationErrorKind::FunctionCallArgTypeMismatch {
-                                name: name.clone(),
+                                name: self.func_signatures.get(&ResourceLocation::new(
+                                    self.pack_name.clone(),
+                                    name.clone(),
+                                )).unwrap().params()[i].name().to_string(),
                                 expected: expected_type,
                                 actual: arg_type,
+                                arg_span: arg.span(),
                             },
                             arg.span(),
                         );
@@ -391,9 +396,10 @@ impl Validator {
                     | Operation::LessThanOrEquals => {
                         if lhs_type != self.type_pool.int() || rhs_type != self.type_pool.int() {
                             self.errors.add(
-                                ValidationErrorKind::ConditionalOperatorTypeMismatch {
+                                ValidationErrorKind::ComparisonOperatorTypeMismatch {
                                     lhs: lhs_type,
                                     rhs: rhs_type,
+                                    op: *op,
                                 },
                                 node.span(),
                             );
@@ -571,19 +577,19 @@ impl Validator {
                         .func_signatures
                         .contains_key(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
                     {
+                        // TODO: make this point to the first declaration
                         self.errors.add(
                             ValidationErrorKind::FunctionAlreadyDefined(name.clone()),
                             node.span(),
                         );
-                        continue;
                     }
 
                     if self.type_pool.has_type(name) {
+                        // TODO: make this point to the struct's declaration
                         self.errors.add(
                             ValidationErrorKind::FunctionStructNameClash(name.clone()),
                             node.span(),
                         );
-                        continue;
                     }
 
                     let mut arg_types = Vec::new();
@@ -673,12 +679,14 @@ pub enum ValidationErrorKind {
     ReturnTypeMismatch {
         expected: TypeKey,
         actual: TypeKey,
+        expr_span: Range<usize>
     },
     ReturnValueExpected(TypeKey),
     FunctionCallArgTypeMismatch {
         name: String,
         expected: TypeKey,
         actual: TypeKey,
+        arg_span: Range<usize>,
     },
     NotEnoughArguments {
         name: String,
@@ -689,9 +697,10 @@ pub enum ValidationErrorKind {
         rhs: TypeKey,
         op: Operation,
     },
-    ConditionalOperatorTypeMismatch {
+    ComparisonOperatorTypeMismatch {
         lhs: TypeKey,
         rhs: TypeKey,
+        op: Operation,
     },
     ArithmeticUnsupported {
         ty: TypeKey,
