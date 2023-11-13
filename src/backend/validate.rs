@@ -213,6 +213,7 @@ impl Validator {
                                 name: name.clone(),
                                 expected: specified_type,
                                 actual: expr_type.clone(),
+                                expr_span: expr.span(),
                             },
                             node.span(),
                         );
@@ -234,6 +235,7 @@ impl Validator {
                                     name: name.clone(),
                                     expected: ty,
                                     actual: expr_type,
+                                    expr_span: expr.span()
                                 },
                                 node.span(),
                             );
@@ -666,6 +668,7 @@ pub enum ValidationErrorKind {
         name: String,
         expected: TypeKey,
         actual: TypeKey,
+        expr_span: Range<usize>
     },
     ReturnTypeMismatch {
         expected: TypeKey,

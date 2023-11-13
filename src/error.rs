@@ -50,14 +50,46 @@ pub fn print_report(
                     report
                         .with_message("cannot break outside a for, while, or foreach loop".to_string())
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::White))
-                },
+                }
                 ValidationErrorKind::ExpectedBoolInIf(ty) => {
                     report
                         .with_message(format!("an if statement's condition must be of type '{}'", type_pool.bool().fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone()))
                             .with_color(Color::Cyan)
                             .with_message(format!("... but '{}' was given instead", ty.fg(Color::Cyan))))
-                },
+                }
+                ValidationErrorKind::ExpectedBoolInForCondition(ty) => {
+                    report
+                        .with_message(format!("a for loop's condition must be of type '{}'", type_pool.bool().fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, error.span.clone()))
+                            .with_color(Color::Cyan)
+                            .with_message(format!("... but '{}' was given instead", ty.fg(Color::Cyan))))
+                }
+                ValidationErrorKind::UnknownVariable(_) => {
+                    report
+                        .with_message("unknown variable")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::UnknownFunction(_) => {
+                    report
+                        .with_message("unknown function")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::VariableAlreadyDefined(_) => {
+                    report
+                        .with_message("a variable with this name already exists in this scope")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::VariableAssignmentTypeMismatch { name, expected, actual, expr_span } => {
+                    report
+                        .with_message(format!("attempted to assign a value of type '{}' to a variable of type '{}'", actual.fg(Color::Cyan), expected.fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, error.span.clone()))
+                            .with_color(Color::Cyan)
+                            .with_message(format!("'{}' is of type '{}' ...", name.fg(Color::Green), expected.fg(Color::Cyan))))
+                        .with_label(Label::new((file_name, expr_span.clone()))
+                            .with_color(Color::Red)
+                            .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
+                }
                 _ => todo!()
             }
         }
