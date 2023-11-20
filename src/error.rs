@@ -170,7 +170,11 @@ pub fn print_report(
                         .with_message("unknown type")
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
-                _ => todo!()
+                ValidationErrorKind::LogicalOperatorTypeMismatch { lhs, rhs, op } => {
+                    report
+                        .with_message(format!("logical operators such as {} can only be applied to operands of type '{}'", op.fg(Color::Yellow), type_pool.bool().fg(Color::Cyan)))
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
             }
         }
     }

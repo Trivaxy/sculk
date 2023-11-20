@@ -350,7 +350,10 @@ impl IrCompiler {
             Operation::LessThan => Instruction::LessThan,
             Operation::GreaterThanOrEquals => Instruction::GreaterThanOrEqual,
             Operation::LessThanOrEquals => Instruction::LessThanOrEqual,
-            _ => unreachable!(), // other operations are unary
+            Operation::And => Instruction::And,
+            Operation::Or => Instruction::Or,
+            Operation::Not
+            | Operation::Negate => unreachable!() // handled by visit_unary_operation
         }
     }
 }
