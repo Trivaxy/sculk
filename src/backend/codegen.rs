@@ -97,8 +97,8 @@ impl CodeGen {
                     eval_stack.handle_op(Operation::GreaterThanOrEquals)
                 }
                 Instruction::LessThanOrEqual => eval_stack.handle_op(Operation::LessThanOrEquals),
-                Instruction::And => todo!(),
-                Instruction::Or => todo!(),
+                Instruction::And => eval_stack.handle_logical_op(Operation::And),
+                Instruction::Or => eval_stack.handle_logical_op(Operation::Or),
                 Instruction::Not => eval_stack.handle_op(Operation::Not),
                 Instruction::Return => {
                     eval_stack.handle_return();
@@ -280,6 +280,39 @@ impl EvaluationStack {
         self.stack.push(a);
     }
 
+    fn handle_logical_op(&mut self, op: Operation) {
+        let b = self.stack.pop().unwrap();
+        let a = self.stack.pop().unwrap();
+
+        self.free_slot(b);
+
+        match op {
+            Operation::And => {
+                self.commands.push(CommandAction::ScoreboardOperation {
+                    op: ScoreboardOperationType::Multiply,
+                    a: self.slot_location(a),
+                    b: self.slot_location(b),
+                });
+            }
+            Operation::Or => {
+                self.commands.push(CommandAction::ScoreboardOperation {
+                    op: ScoreboardOperationType::Add,
+                    a: self.slot_location(a),
+                    b: self.slot_location(b),
+                });
+
+                self.commands.push(CommandAction::ScoreboardOperation {
+                    op: ScoreboardOperationType::Divide,
+                    a: self.slot_location(a),
+                    b: self.slot_location(a),
+                });
+            }
+            _ => unreachable!("invalid logical op")
+        }
+
+        self.stack.push(a);
+    }
+
     fn handle_comparison_op(&mut self, op: Operation) {
         let b = self.stack.pop().unwrap();
         let a = self.stack.pop().unwrap();
@@ -339,6 +372,8 @@ impl EvaluationStack {
             | Operation::LessThan
             | Operation::GreaterThanOrEquals
             | Operation::LessThanOrEquals => self.handle_comparison_op(op),
+            Operation::And
+            | Operation::Or => self.handle_logical_op(op),
             Operation::Not => {
                 let a = self.stack.pop().unwrap();
 

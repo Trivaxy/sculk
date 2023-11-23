@@ -407,6 +407,21 @@ impl Validator {
 
                         return self.type_pool.bool();
                     }
+                    Operation::And
+                    | Operation::Or => {
+                        if lhs_type != self.type_pool.bool() || rhs_type != self.type_pool.bool() {
+                            self.errors.add(
+                                ValidationErrorKind::LogicalOperatorTypeMismatch {
+                                    lhs: lhs_type,
+                                    rhs: rhs_type,
+                                    op: *op,
+                                },
+                                node.span(),
+                            );
+                        }
+
+                        return self.type_pool.bool();
+                    }
                     _ => {}
                 }
 
@@ -698,6 +713,11 @@ pub enum ValidationErrorKind {
         op: Operation,
     },
     ComparisonOperatorTypeMismatch {
+        lhs: TypeKey,
+        rhs: TypeKey,
+        op: Operation,
+    },
+    LogicalOperatorTypeMismatch {
         lhs: TypeKey,
         rhs: TypeKey,
         op: Operation,

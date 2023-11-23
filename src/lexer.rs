@@ -47,6 +47,12 @@ pub enum Token<'a> {
     #[token("!=")]
     NotEquals,
 
+    #[token("&&")]
+    And,
+
+    #[token("||")]
+    Or,
+
     #[token("!")]
     Not,
 

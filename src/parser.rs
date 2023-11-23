@@ -17,6 +17,8 @@ pub enum Operation {
     NotEquals,
     Not,
     Negate,
+    And,
+    Or
 }
 
 impl Display for Operation {
@@ -35,6 +37,8 @@ impl Display for Operation {
             Operation::NotEquals => "!=",
             Operation::Not => "!",
             Operation::Negate => "-",
+            Operation::And => "&&",
+            Operation::Or => "||",
         };
 
         write!(f, "{}", op)
@@ -482,7 +486,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self) -> ParserKindResult {
-        self.parse_equality()
+        self.parse_or()
     }
 
     fn parse_number(&mut self) -> ParserKindResult {
@@ -553,6 +557,50 @@ impl<'a> Parser<'a> {
         let expr = self.call(Self::parse_unary)?;
 
         Ok(ParserNodeKind::Unary(Box::new(expr), op))
+    }
+
+    fn parse_or(&mut self) -> ParserKindResult {
+        let mut expr = self.call(Self::parse_and)?;
+
+        while self.tokens.peek().is_some() {
+            let op = match self.tokens.peek().unwrap() {
+                Token::Or => Operation::Or,
+                _ => break
+            };
+
+            self.tokens.next();
+
+            let term = self.call(Self::parse_and)?;
+            let span = expr.span().start..term.span().end;
+            expr = ParserNode::new(
+                ParserNodeKind::Operation(Box::new(expr), Box::new(term), op),
+                span,
+            );
+        }
+
+        Ok(ParserNodeKind::Expression(Box::new(expr)))
+    }
+
+    fn parse_and(&mut self) -> ParserKindResult {
+        let mut expr = self.call(Self::parse_equality)?;
+
+        while self.tokens.peek().is_some() {
+            let op = match self.tokens.peek().unwrap() {
+                Token::And => Operation::And,
+                _ => break
+            };
+
+            self.tokens.next();
+
+            let term = self.call(Self::parse_equality)?;
+            let span = expr.span().start..term.span().end;
+            expr = ParserNode::new(
+                ParserNodeKind::Operation(Box::new(expr), Box::new(term), op),
+                span,
+            );
+        }
+
+        Ok(ParserNodeKind::Expression(Box::new(expr)))
     }
 
     // does not necessarily parse an equality, but rather an equality or a comparison (and in turn a comparison or a term)
