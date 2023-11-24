@@ -64,14 +64,21 @@ impl Validator {
                 return_ty,
                 body,
             } => {
-                self.scope_stack.push();
-
                 let func_signature = self
                     .func_signatures
                     .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
                     .unwrap();
 
                 self.current_return_type = Some(func_signature.return_type());
+
+                if func_signature.return_type() != self.type_pool.none() && !self.check_node_returns(body) {
+                    self.errors.add(
+                        ValidationErrorKind::NotAllPathsReturn,
+                        node.span(),
+                    );
+                }
+
+                self.scope_stack.push();
 
                 func_signature.params().iter().for_each(|param| {
                     self.scope_stack
@@ -492,6 +499,23 @@ impl Validator {
         }
     }
 
+    fn check_node_returns(&self, node: &ParserNode) -> bool {
+        match node.kind() {
+            ParserNodeKind::Return(_) => true,
+            ParserNodeKind::If {
+                body,
+                else_ifs,
+                else_body,
+                ..
+            } => self.check_node_returns(&body)
+                && else_ifs.iter().all(|(_, body)| self.check_node_returns(body))
+                && else_body.as_ref().map_or(false, |body| self.check_node_returns(&body)),
+            ParserNodeKind::For { .. } => false,
+            ParserNodeKind::Block(nodes) => nodes.iter().any(|node| self.check_node_returns(node)),
+            _ => false,
+        }
+    }
+
     // should only be passed the contents of the root Program node
     fn scan_struct_defs(&mut self, nodes: &[ParserNode]) {
         let struct_defs = nodes
@@ -697,6 +721,7 @@ pub enum ValidationErrorKind {
         expr_span: Range<usize>
     },
     ReturnValueExpected(TypeKey),
+    NotAllPathsReturn,
     FunctionCallArgTypeMismatch {
         name: String,
         expected: TypeKey,

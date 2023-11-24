@@ -102,6 +102,11 @@ pub fn print_report(
                         .with_message(format!("expected a return value of type '{}'", expected.fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
+                ValidationErrorKind::NotAllPathsReturn => {
+                    report
+                        .with_message("not all paths return a value")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
                 ValidationErrorKind::FunctionCallArgTypeMismatch { name, expected, actual, arg_span } => {
                     report
                         .with_message(format!("incorrect argument type, the type of parameter '{}' is '{}'", name.fg(Color::Green), expected.fg(Color::Cyan)))
