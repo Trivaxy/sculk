@@ -15,3 +15,28 @@ fn pow(a: int, b: int) -> int {
 
     return c;
 }
+
+struct Vector3 {
+    x: int,
+    y: int,
+    z: int,
+
+    static fn single(x: int) -> Vector3 {
+        return Vector3(x, x, x);
+    }
+
+    fn diff(other: Vector3) -> Vector3 {
+        return Vector3(other.x - self.x, other.y - self.y, other.z - self.z);
+    }
+
+    fn dot(other: Vector3) -> int {
+        return self.x * other.x + self.y * other.y + self.z * other.z;
+    }
+
+    fn shift() {
+        let t = self.x;
+        self.x = self.y;
+        self.y = self.z;
+        self.z = t;
+    }
+}

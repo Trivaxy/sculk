@@ -5,7 +5,7 @@ use crate::{
     parser::{Operation, ParserNode, ParserNodeKind},
 };
 
-use super::{function::FunctionSignature, type_pool::TypePool, types::FieldDef};
+use super::{function::FunctionSignature, type_pool::{TypePool, TypeKey}, types::FieldDef, resolve::{Resolver, Resolution}, validate::ScopeStack};
 
 /// The instructions that make up Sculk's Intermediate Representation (IR).
 /// These are generated during the IR generation phase of compilation, where the AST is compiled to IR.
@@ -16,27 +16,28 @@ use super::{function::FunctionSignature, type_pool::TypePool, types::FieldDef};
 /// At this stage of compilation, information about parameter and local names is lost.
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
-    PushInteger(i32),
-    PushBoolean(bool),
-    PushLocal(usize),
-    StoreLocal(usize),
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    Modulo,
-    Equal,
-    NotEqual,
-    GreaterThan,
-    LessThan,
-    GreaterThanOrEqual,
-    LessThanOrEqual,
-    And,
-    Or,
-    Not,
-    Return,
-    Break,
-    Call(ResourceLocation),
+    PushInteger(i32),                           // pushes an integer onto the stack
+    PushBoolean(bool),                          // pushes a boolean onto the stack
+    PushLocal(usize),                           // pushes a local value with the given index onto the stack
+    StoreLocal(usize),                          // pops a value off the stack and stores it in the local with the given index
+    Add,                                        // pops two integers off the stack, adds them, and pushes the result onto the stack
+    Subtract,                                   // pops two integers off the stack, subtracts them, and pushes the result onto the stack
+    Multiply,                                   // pops two integers off the stack, multiplies them, and pushes the result onto the stack
+    Divide,                                     // pops two integers off the stack, divides them, and pushes the result onto the stack
+    Modulo,                                     // pops two integers off the stack, mods them, and pushes the result onto the stack
+    Equal,                                      // pops two values off the stack, compares them for equality, and pushes the resulting boolean onto the stack
+    NotEqual,                                   // pops two integers off the stack, compares them for inequality, and pushes the resulting boolean onto the stack
+    GreaterThan,                                // pops two integers off the stack, compares them for greater-than, and pushes the resulting boolean onto the stack
+    LessThan,                                   // pops two integers off the stack, compares them for less-than, and pushes the resulting boolean onto the stack
+    GreaterThanOrEqual,                         // pops two integers off the stack, compares them for greater-than-or-equal, and pushes the resulting boolean onto the stack
+    LessThanOrEqual,                            // pops two integers off the stack, compares them for less-than-or-equal, and pushes the resulting boolean onto the stack
+    And,                                        // pops two booleans off the stack, ands them, and pushes the resulting boolean onto the stack
+    Or,                                         // pops two booleans off the stack, ors them, and pushes the resulting boolean onto the stack
+    Not,                                        // pops a boolean off the stack, negates it, and pushes the resulting boolean onto the stack
+    Return,                                     // returns from the function
+    Break,                                      // breaks out of the current block
+    CallGlobal(ResourceLocation),               // pops arguments from the stack and calls the global function at the given location
+    CallMethod(TypeKey, usize),                 // pops arguments from the stack and calls the method at the given index for the given type                      
     // Explanation: In Sculk IR any form of control flow happens via jumping in and out of blocks
     // There is no branching/jumping directly into a label/offset since that is hellish to accomplish in Minecraft
     // For example, consider: if x < 5 { broadcast(y); }
@@ -53,11 +54,13 @@ pub enum Instruction {
     // The boolean value represents whether or not the block is actually a loop. This is needed to make break statements function properly
     StartBlock(bool),
     EndBlock,
-    JumpInIf,
-    JumpInEither,
-    RepeatIf, // only valid when inside a block. will repeat the block if the condition is true
-    EmitCommandLiteral(String),
-    AccessField(String),
+    JumpInIf,                                   // pops a boolean off the stack, pops a block, and jumps into the block if the condition is true
+    JumpInEither,                               // pops a boolean off the stack, pops the else block, pops the if block, and jumps into one of the blocks depending on the condition
+    RepeatIf,                                   // only valid when inside a block. pops a boolean and jumps to the block's start if true
+    EmitCommandLiteral(String),                 // hacks
+    Construct(TypeKey),                         // pops arguments from the stack and calls the constructor for the given type, pushes the instance onto the stack
+    PushField(usize),                           // pops a struct off the stack and pushes the field at the given index onto the stack
+    StoreField(usize),                          // pops a struct and value off the stack and stores it in the field at the given index
 }
 
 impl Display for Instruction {
@@ -85,23 +88,29 @@ impl Display for Instruction {
             Not => write!(f, "not"),
             Return => write!(f, "return"),
             Break => write!(f, "break"),
-            Call(name) => write!(f, "call {}", name),
+            CallGlobal(name) => write!(f, "callglobal {}", name),
+            CallMethod(ty, idx) => write!(f, "callmethod {}.{}", ty, idx),
             StartBlock(is_loop) => write!(f, "startblock [loop={}]", is_loop),
             EndBlock => write!(f, "endblock"),
             JumpInIf => write!(f, "jumpinif"),
             JumpInEither => write!(f, "jumpineither"),
             RepeatIf => write!(f, "repeatif"),
             EmitCommandLiteral(cmd) => write!(f, "emitcommandliteral {}", cmd),
-            AccessField(name) => write!(f, "accessfield {}", name),
+            Construct(type_key) => write!(f, "construct {}", type_key),
+            PushField(idx) => write!(f, "pushfield {}", idx),
+            StoreField(idx) => write!(f, "storefield {}", idx),
         }
     }
 }
 
-/// Takes in the validated AST, the type pool, function signatures, and compiles every function into Sculk IR.
+/// This is the compilation step that happens right after validation.
+/// At this point, the program is assumed to be sound, so the IrCompiler doesn't do any verification.
+/// This type will take in the validated AST, as well as the global function signatures and types constructed during validation.
+/// All functions will be compiled to their intermediate representation, before the final step (CodeGen) is run.
 pub struct IrCompiler {
     pack_name: String,
     types: TypePool,
-    func_signatures: HashMap<ResourceLocation, FunctionSignature>,
+    global_functions: HashMap<ResourceLocation, FunctionSignature>,
     builder: IrFunctionBuilder,
     compiled_funcs: Vec<IrFunction>,
 }
@@ -110,12 +119,12 @@ impl IrCompiler {
     pub fn new(
         pack_name: String,
         types: TypePool,
-        func_signatures: HashMap<ResourceLocation, FunctionSignature>,
+        global_functions: HashMap<ResourceLocation, FunctionSignature>,
     ) -> Self {
         Self {
             pack_name,
             types,
-            func_signatures,
+            global_functions,
             builder: IrFunctionBuilder::new(),
             compiled_funcs: Vec::new(),
         }
@@ -128,7 +137,7 @@ impl IrCompiler {
         TypePool,
         Vec<IrFunction>,
     ) {
-        (self.func_signatures, self.types, self.compiled_funcs)
+        (self.global_functions, self.types, self.compiled_funcs)
     }
 
     // Takes in the top-level node in the AST which is typically just a vector of functions and their bodies
@@ -138,9 +147,8 @@ impl IrCompiler {
             match node.kind() {
                 ParserNodeKind::FunctionDeclaration {
                     name,
-                    args,
-                    return_ty,
                     body,
+                    ..
                 } => {
                     let func = self.compile_function(name.to_owned(), body.as_block());
                     self.compiled_funcs.push(func);
@@ -154,7 +162,7 @@ impl IrCompiler {
     // Takes in a function's name and its respective body in the AST, and compiles it into Sculk IR
     fn compile_function(&mut self, name: String, body: &[ParserNode]) -> IrFunction {
         self.builder.begin(
-            self.func_signatures
+            self.global_functions
                 .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
                 .unwrap(),
         );
@@ -183,7 +191,7 @@ impl IrCompiler {
             ParserNodeKind::OpEquals { name, expr, op } => {
                 self.visit_operation_equals(name, expr, *op)
             }
-            ParserNodeKind::FunctionCall { name, args } => self.visit_function_call(name, args),
+            ParserNodeKind::FunctionCall { .. } => self.visit_function_call(node),
             ParserNodeKind::Block(body) => self.visit_block(body),
             ParserNodeKind::Return(expr) => self.visit_return(expr),
             ParserNodeKind::Break => self.builder.emit(Instruction::Break),
@@ -202,7 +210,7 @@ impl IrCompiler {
             ParserNodeKind::CommandLiteral(cmd) => self
                 .builder
                 .emit(Instruction::EmitCommandLiteral(cmd.to_owned())),
-            ParserNodeKind::MemberAccess { expr, member } => todo!(),
+            ParserNodeKind::MemberAccess { expr, member } => self.visit_member_access(expr, member.as_identifier()),
             // the below nodes don't need any work, they've been handled by previous phases of compilation
             ParserNodeKind::Program(_) => {}
             ParserNodeKind::TypedIdentifier { .. } => {}
@@ -265,15 +273,21 @@ impl IrCompiler {
         self.builder.emit(Instruction::StoreLocal(idx));
     }
 
-    fn visit_function_call(&mut self, name: &str, args: &[ParserNode]) {
+    fn visit_function_call(&mut self, node: &ParserNode) {
+        let (expr, args) = node.as_function_call();
+
+        self.visit_node(expr);
+
         for arg in args {
             self.visit_node(arg);
         }
 
-        self.builder.emit(Instruction::Call(ResourceLocation::new(
-            self.pack_name.clone(),
-            name.to_owned(),
-        )));
+        match Resolver::new(&self.pack_name, &self.global_functions, &self.types, &ScopeStack::empty()).resolve(node).unwrap() {
+            Resolution::GlobalFunction(name) => self.builder.emit(Instruction::CallGlobal(ResourceLocation::new(self.pack_name.to_string(), name))),
+            Resolution::Method(ty, name) => self.builder.emit(Instruction::CallMethod(ty, ty.from(&self.types).as_struct_def().function_idx(&name).unwrap())),
+            Resolution::Constructor(ty) => self.builder.emit(Instruction::Construct(ty)),
+            _ => unreachable!(),
+        }
     }
 
     fn visit_block(&mut self, body: &[ParserNode]) {
@@ -335,6 +349,33 @@ impl IrCompiler {
 
         self.visit_node(cond);
         self.builder.emit(Instruction::JumpInIf);
+    }
+
+    fn visit_member_access(&mut self, expr: &ParserNode, member: &str) {
+        self.visit_node(expr);
+
+        match Resolver::new(&self.pack_name, &self.global_functions, &self.types, &ScopeStack::empty()).resolve(expr).unwrap() {
+            Resolution::Variable(ty) => {
+                let struct_def = ty.from(&self.types).as_struct_def();
+
+                if let Some(field_idx) = struct_def.field_idx(member) {
+                    self.builder.emit(Instruction::PushField(field_idx));
+                } else {
+                    unreachable!()
+                }
+            },
+            Resolution::Field(ty, name) => {
+                let struct_def = ty.from(&self.types).as_struct_def();
+                let field_type_def = struct_def.field(&name).unwrap().field_type().from(&self.types).as_struct_def();
+
+                if let Some(field_idx) = field_type_def.field_idx(member) {
+                    self.builder.emit(Instruction::PushField(field_idx));
+                } else {
+                    unreachable!()
+                }
+            },
+            _ => unreachable!(),
+        }
     }
 
     fn op_to_instr(op: Operation) -> Instruction {

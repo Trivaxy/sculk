@@ -1,6 +1,6 @@
 use std::{cell::Ref, fmt::Display};
 
-use super::type_pool::TypeKey;
+use super::{type_pool::{TypeKey, TypePool}, function::FunctionSignature};
 
 /// The definition of a type in Sculk. These will end up inside a TypePool when the program is validated.
 #[derive(Debug, Clone)]
@@ -74,6 +74,9 @@ impl Display for SculkType {
 pub struct StructDef {
     name: String,
     fields: Vec<FieldDef>,
+    functions: Vec<FunctionSignature>,
+    // Typically never None, but Option is needed since the constructor is added only after the struct is registered in a type pool
+    constructor: Option<FunctionSignature>,
 }
 
 impl StructDef {
@@ -81,6 +84,8 @@ impl StructDef {
         Self {
             name,
             fields: Vec::new(),
+            functions: Vec::new(),
+            constructor: None, // this will be set upon registration
         }
     }
 
@@ -94,7 +99,17 @@ impl StructDef {
         Ok(())
     }
 
-    pub fn self_referencing(&self) -> bool {
+    pub fn add_function(&mut self, function: FunctionSignature) -> Result<(), ()> {
+        if self.functions.iter().any(|f| f.name() == function.name()) {
+            return Err(());
+        }
+
+        self.functions.push(function);
+
+        Ok(())
+    }
+
+    pub fn self_referencing(&self, types: &TypePool) -> bool {
         let mut field_types = self
             .fields
             .iter()
@@ -102,8 +117,7 @@ impl StructDef {
             .collect::<Vec<TypeKey>>();
 
         while !field_types.is_empty() {
-            let field_type_key = field_types.pop().unwrap();
-            let field_type = &*field_type_key.get();
+            let field_type = field_types.pop().unwrap().from(types);
 
             if let SculkType::Struct(def) = field_type {
                 if def.name == self.name {
@@ -123,6 +137,35 @@ impl StructDef {
 
     pub fn fields(&self) -> &[FieldDef] {
         &self.fields
+    }
+
+    pub fn functions(&self) -> &[FunctionSignature] {
+        &self.functions
+    }
+
+    pub fn field(&self, name: &str) -> Option<&FieldDef> {
+        self.fields.iter().find(|f| f.name == name)
+    }
+
+    pub fn field_idx(&self, name: &str) -> Option<usize> {
+        self.fields.iter().position(|f| f.name == name)
+    }
+
+    pub fn function(&self, name: &str) -> Option<&FunctionSignature> {
+        self.functions.iter().find(|f| f.name() == name)
+    }
+
+    pub fn function_idx(&self, name: &str) -> Option<usize> {
+        self.functions.iter().position(|f| f.name() == name)
+    }
+
+    pub fn constructor(&self) -> &FunctionSignature {
+        self.constructor.as_ref().unwrap()
+    }
+
+    pub fn set_constructor(&mut self, constructor: FunctionSignature) {
+        assert!(self.constructor.is_none());
+        self.constructor = Some(constructor);
     }
 }
 

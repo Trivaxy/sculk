@@ -110,6 +110,12 @@ pub enum Token<'a> {
     #[token("struct")]
     Struct,
 
+    #[token("static")]
+    Static,
+
+    #[token("self")]
+    Self_,
+
     #[regex(r"true|false", |tok| tok.slice().parse())]
     Bool(bool),
 
@@ -118,6 +124,9 @@ pub enum Token<'a> {
 
     #[token(":")]
     Colon,
+
+    #[token(".")]
+    Dot,
 
     #[token(",")]
     Comma,

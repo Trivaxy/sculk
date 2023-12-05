@@ -3,7 +3,7 @@ use std::{io, collections::HashMap};
 use ariadne::{Report, ReportKind, Label, Color, Source, Fmt};
 
 use crate::{
-    backend::{type_pool::TypePool, validate::{ValidationError, ValidationErrorKind}, function::FunctionSignature},
+    backend::{type_pool::TypePool, validate::{ValidationError, ValidationErrorKind}, function::FunctionSignature, resolve::{ResolutionError, Resolution}},
     parser::ParseError, data::ResourceLocation,
 };
 
@@ -107,14 +107,14 @@ pub fn print_report(
                         .with_message("not all paths return a value")
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
-                ValidationErrorKind::FunctionCallArgTypeMismatch { name, expected, actual, arg_span } => {
+                ValidationErrorKind::FunctionCallArgTypeMismatch { name, expected, actual } => {
                     report
                         .with_message(format!("incorrect argument type, the type of parameter '{}' is '{}'", name.fg(Color::Green), expected.fg(Color::Cyan)))
-                        .with_label(Label::new((file_name, arg_span.clone()))
+                        .with_label(Label::new((file_name, error.span.clone()))
                             .with_color(Color::Red)
                             .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
                 }
-                ValidationErrorKind::NotEnoughArguments { name, missing } => {
+                ValidationErrorKind::NotEnoughArguments { missing, callee_span } => {
                     report
                         .with_message(format!("not enough arguments"))
                         .with_label(Label::new((file_name, error.span.clone()))
@@ -180,6 +180,48 @@ pub fn print_report(
                         .with_message(format!("logical operators such as {} can only be applied to operands of type '{}'", op.fg(Color::Yellow), type_pool.bool().fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
+                ValidationErrorKind::CouldNotResolve(res_error) => match res_error {
+                    ResolutionError::AmbiguousIdentifier { name, candidates } => {
+                        report
+                            .with_message(format!("ambiguous identifier '{}'", name.fg(Color::Green)))
+                            .with_label(Label::new((file_name, error.span.clone()))
+                                .with_color(Color::Red)
+                                .with_message(format!("candidates: {}", candidates.iter().map(|c| match c {
+                                    Resolution::Variable(ty) => format!("- variable '{}'", name.fg(Color::Green)),
+                                    Resolution::GlobalFunction(name) => format!("global function '{}'", name.fg(Color::Green)),
+                                    Resolution::Type(ty) => format!("- type '{}'", name.fg(Color::Green)),
+                                    Resolution::Field(ty, name) => format!("- field '{}' of type '{}'", name.fg(Color::Green), ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan)),
+                                    Resolution::Method(ty, name) => format!("- method '{}' of type '{}'", name.fg(Color::Green), ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan)),
+                                    Resolution::Constructor(ty) => format!("- constructor of type '{}'", name.fg(Color::Cyan)),
+                                }).collect::<Vec<String>>().join("\n"))))
+                    }
+                    ResolutionError::UnresolvedIdentifier(name) => {
+                        report
+                            .with_message(format!("unknown identifier '{}'", name.fg(Color::Green)))
+                            .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                    }
+                    ResolutionError::MemberDoesNotExist(ty, name) => {
+                        report
+                            .with_message(format!("type '{}' does not have a member named '{}'", ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan), name.fg(Color::Green)))
+                            .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                    }
+                    ResolutionError::CannotCallExpression => {
+                        report
+                            .with_message("expressions are not callable")
+                            .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                    }
+                    ResolutionError::CannotCallMember(name) => {
+                        report
+                            .with_message(format!("cannot call member '{}', as it is not a method", name.fg(Color::Green)))
+                            .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                    }
+                    ResolutionError::CannotAccessMember(name) => {
+                        report
+                            .with_message(format!("cannot access member '{}', as it is not a field", name.fg(Color::Green)))
+                            .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                    }
+                }
+                ValidationErrorKind::CannotReferenceMethodAsValue => todo!(),
             }
         }
     }

@@ -130,7 +130,7 @@ fn compile_file(
         return (
             Some(Info {
                 types: validator_output.types,
-                signatures: validator_output.signatures,
+                signatures: validator_output.global_functions,
             }),
             Err(errors),
         );
@@ -139,7 +139,7 @@ fn compile_file(
     let mut ir_compiler = IrCompiler::new(
         config.pack.clone(),
         validator_output.types,
-        validator_output.signatures,
+        validator_output.global_functions,
     );
     ir_compiler.visit_program(parser_output.ast.as_program());
 
