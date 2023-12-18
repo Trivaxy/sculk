@@ -182,14 +182,14 @@ impl IrCompiler {
             ParserNodeKind::VariableDeclaration { name, expr, .. } => {
                 self.visit_variable_store(name, expr)
             }
-            ParserNodeKind::VariableAssignment { name, expr } => {
-                self.visit_variable_store(name, expr)
+            ParserNodeKind::VariableAssignment { path, expr } => {
+                self.visit_variable_store(path, expr)
             }
             ParserNodeKind::Expression(expr) => self.visit_node(expr),
             ParserNodeKind::Operation(lhs, rhs, op) => self.visit_binary_operation(lhs, rhs, *op),
             ParserNodeKind::Unary(expr, op) => self.visit_unary_operation(expr, *op),
-            ParserNodeKind::OpEquals { name, expr, op } => {
-                self.visit_operation_equals(name, expr, *op)
+            ParserNodeKind::OpEquals { path, expr, op } => {
+                self.visit_operation_equals(path, expr, *op)
             }
             ParserNodeKind::FunctionCall { .. } => self.visit_function_call(node),
             ParserNodeKind::Block(body) => self.visit_block(body),
@@ -232,7 +232,7 @@ impl IrCompiler {
         self.builder.emit(Instruction::PushLocal(idx));
     }
 
-    fn visit_variable_store(&mut self, name: &str, expr: &ParserNode) {
+    fn visit_variable_store(&mut self, path: &ParserNode, expr: &ParserNode) {
         self.visit_node(expr);
 
         let idx = self.builder.get_local_index(name);
@@ -261,7 +261,7 @@ impl IrCompiler {
         }
     }
 
-    fn visit_operation_equals(&mut self, name: &str, expr: &ParserNode, op: Operation) {
+    fn visit_operation_equals(&mut self, path: &ParserNode, expr: &ParserNode, op: Operation) {
         let idx = self.builder.get_local_index(name);
         self.builder.emit(Instruction::PushLocal(idx));
 
