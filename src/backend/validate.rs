@@ -60,7 +60,7 @@ impl<'a> Validator<'a> {
     }
 
     fn visit_node(&mut self, node: &'a ParserNode) -> TypeKey {
-        match node.kind() {
+        let ty = match node.kind() {
             ParserNodeKind::Program(nodes) => {
                 for node in nodes {
                     self.visit_node(node);
@@ -216,7 +216,6 @@ impl<'a> Validator<'a> {
                     }
                 };
 
-                self.tags.tag_type(node, ty);
                 ty
             }
             ParserNodeKind::TypedIdentifier { .. } => self.types.none(),
@@ -337,6 +336,7 @@ impl<'a> Validator<'a> {
                     Err(err) => {
                         self.errors
                             .add(ValidationErrorKind::CouldNotResolve(err), node.span());
+
                         return self.types.unknown();
                     }
                 };
@@ -405,16 +405,11 @@ impl<'a> Validator<'a> {
                     }
                 }
 
-                self.tags.tag_type(node, ret_type);
                 self.tags.tag_resolution(node, callee);
 
                 ret_type
             }
-            ParserNodeKind::Expression(expr) => {
-                let ty = self.visit_node(expr);
-                self.tags.tag_type(expr, ty);
-                ty
-            }
+            ParserNodeKind::Expression(expr) => self.visit_node(expr),
             ParserNodeKind::Operation(lhs, rhs, op) => {
                 let lhs_type = self.visit_node(lhs);
                 let rhs_type = self.visit_node(rhs);
@@ -437,8 +432,7 @@ impl<'a> Validator<'a> {
                             );
                         }
 
-                        self.tags.tag_type(node, self.types.bool());
-                        return self.types.bool();
+                        self.types.bool()
                     }
                     Operation::And | Operation::Or => {
                         if lhs_type != self.types.bool() || rhs_type != self.types.bool() {
@@ -451,43 +445,40 @@ impl<'a> Validator<'a> {
                                 node.span(),
                             );
                         }
-
-                        self.tags.tag_type(node, self.types.bool());
-                        return self.types.bool();
+                        
+                        self.types.bool()
                     }
-                    _ => {}
+                    _ => {
+                        if lhs_type != rhs_type {
+                            self.errors.add(
+                                ValidationErrorKind::OperationTypeMismatch {
+                                    lhs: lhs_type.clone(),
+                                    rhs: rhs_type.clone(),
+                                    op: *op,
+                                },
+                                node.span(),
+                            );
+                        }
+        
+                        if lhs_type != self.types.int() {
+                            self.errors.add(
+                                ValidationErrorKind::ArithmeticUnsupported {
+                                    ty: lhs_type.clone(),
+                                },
+                                lhs.span(),
+                            )
+                        }
+        
+                        if rhs_type != self.types.int() {
+                            self.errors.add(
+                                ValidationErrorKind::ArithmeticUnsupported { ty: rhs_type },
+                                rhs.span(),
+                            );
+                        }
+        
+                        lhs_type
+                    }
                 }
-
-                if lhs_type != rhs_type {
-                    self.errors.add(
-                        ValidationErrorKind::OperationTypeMismatch {
-                            lhs: lhs_type.clone(),
-                            rhs: rhs_type.clone(),
-                            op: *op,
-                        },
-                        node.span(),
-                    );
-                }
-
-                if lhs_type != self.types.int() {
-                    self.errors.add(
-                        ValidationErrorKind::ArithmeticUnsupported {
-                            ty: lhs_type.clone(),
-                        },
-                        lhs.span(),
-                    )
-                }
-
-                if rhs_type != self.types.int() {
-                    self.errors.add(
-                        ValidationErrorKind::ArithmeticUnsupported { ty: rhs_type },
-                        rhs.span(),
-                    );
-                }
-
-                self.tags.tag_type(node, lhs_type);
-
-                lhs_type
             }
             ParserNodeKind::OpEquals { path, expr, .. } => {
                 let expr_type = self.visit_node(expr);
@@ -504,6 +495,7 @@ impl<'a> Validator<'a> {
                     Err(err) => {
                         self.errors
                             .add(ValidationErrorKind::CouldNotResolve(err), node.span());
+
                         return self.types.unknown();
                     }
                 };
@@ -553,6 +545,7 @@ impl<'a> Validator<'a> {
                     Err(err) => {
                         self.errors
                             .add(ValidationErrorKind::CouldNotResolve(err), node.span());
+                        
                         return self.types.unknown();
                     }
                 }
@@ -569,7 +562,13 @@ impl<'a> Validator<'a> {
                 self.current_struct = None;
                 self.types.none()
             }
+        };
+
+        if ty != self.types.none() && ty != self.types.unknown() {
+            self.tags.tag_type(node, ty);
         }
+
+        ty
     }
 
     fn resolver(&self) -> Resolver {
