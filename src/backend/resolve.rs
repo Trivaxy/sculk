@@ -38,7 +38,6 @@ impl<'a> Resolver<'a> {
     pub fn resolve(&mut self, callee: &ParserNode) -> Result<Resolution, ResolutionError> {
         let mut resolution = Resolution(Vec::new());
         self.resolve_inner(&mut resolution, callee)?;
-        resolution.0.reverse();
         Ok(resolution)
     }
 
