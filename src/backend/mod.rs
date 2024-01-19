@@ -1,4 +1,9 @@
-//pub mod codegen_old;
+use std::path::Path;
+
+use crate::Config;
+
+use self::{ir::IrFunction, codegen::CodeGen};
+
 pub mod codegen;
 pub mod function;
 pub mod ir;
@@ -6,3 +11,36 @@ pub mod resolve;
 pub mod type_pool;
 pub mod types;
 pub mod validate;
+
+pub trait Backend {
+    fn compile(config: &Config, ir: &[IrFunction]);
+}
+
+pub struct DefaultBackend;
+
+impl Backend for DefaultBackend {
+    fn compile(config: &Config, ir: &[IrFunction]) {
+        let mut codegen = CodeGen::new(config.pack.clone());
+        codegen.compile_ir_functions(ir);
+
+        let compiled_funcs = codegen.dissolve();
+
+        for func in compiled_funcs {
+            let namespace_path = Path::new(&config.pack);
+
+            if let Err(err) = std::fs::create_dir_all(&namespace_path) {
+                println!("failed to create namespace directory: {}", err);
+                return;
+            }
+
+            if let Err(err) = std::fs::write(
+                format!("{}.mcfunction", namespace_path
+                    .join(func.name().path.clone()).display()),
+                func.to_string()
+            ) {
+                println!("failed to write function file: {}", err);
+                return;
+            }
+        }
+    }
+}

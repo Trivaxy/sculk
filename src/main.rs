@@ -6,7 +6,7 @@ use backend::{
     ir::{IrCompiler, IrFunction},
     type_pool::TypePool,
     types::SculkType,
-    validate::{Validator, ValidatorOutput},
+    validate::{Validator, ValidatorOutput}, DefaultBackend, Backend,
 };
 use data::ResourceLocation;
 use error::CompileError;
@@ -22,7 +22,7 @@ mod parser;
 
 #[derive(argh::FromArgs)]
 /// Configuration for the compiler.
-struct Config {
+pub struct Config {
     /// a list of paths to sculk files that should be compiled
     #[argh(positional)]
     files: Vec<String>,
@@ -30,6 +30,10 @@ struct Config {
     /// the name of the datapack to generate
     #[argh(option, short = 'n', default = "String::from(\"pack\")")]
     pack: String,
+
+    /// the backend to use for compilation
+    #[argh(option, short = 'b', default = "String::from(\"default\")")]
+    backend: String,
 
     #[argh(switch, short = 'd')]
     /// dumps sculk's ir to a file for debugging purposes
@@ -49,30 +53,8 @@ fn main() {
     for file in &config.files {
         let (info, result) = compile_file(&config, file);
 
-        let compiled_funcs = match result {
-            Ok(funcs) => funcs,
-            Err(errs) => {
-                errors.push((file, errs, info));
-                continue;
-            }
-        };
-
-        for func in compiled_funcs {
-            let namespace_path = Path::new(&config.pack);
-
-            if let Err(err) = std::fs::create_dir_all(&namespace_path) {
-                println!("failed to create namespace directory: {}", err);
-                return;
-            }
-
-            if let Err(err) = std::fs::write(
-                format!("{}.mcfunction", namespace_path
-                    .join(func.name().path.clone()).display()),
-                func.to_string()
-            ) {
-                println!("failed to write function file: {}", err);
-                return;
-            }
+        if let Err(errs) = result {
+            errors.push((file, errs, info));
         }
     }
 
@@ -97,7 +79,7 @@ fn compile_file(
     path: &str,
 ) -> (
     Option<Info>,
-    Result<Vec<CompiledFunction>, Vec<CompileError>>,
+    Result<(), Vec<CompileError>>,
 ) {
     let file_content = match std::fs::read_to_string(path) {
         Ok(content) => content,
@@ -145,16 +127,19 @@ fn compile_file(
 
     let (signatures, types, tags, funcs) = ir_compiler.dissolve();
 
-    if errors.is_empty() && config.dump_ir {
+    if config.dump_ir {
         dump_ir(&config, &types, &signatures, &funcs);
     }
 
-    let mut codegen = CodeGen::new(config.pack.clone());
-    codegen.compile_ir_functions(&funcs);
+    match config.backend.as_str() {
+        "default" => DefaultBackend::compile(config, &funcs),
+        _ => {
+            println!("unknown backend: {}", config.backend);
+            return (None, Err(Vec::new()));
+        }
+    }
 
-    let final_output = codegen.dissolve();
-
-    (Some(Info { types, signatures }), Ok(final_output))
+    (Some(Info { types, signatures }), Ok(()))
 }
 
 fn dump_ir(config: &Config, types: &TypePool, signatures: &HashMap<ResourceLocation, FunctionSignature>, funcs: &[IrFunction]) {
