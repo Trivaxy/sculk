@@ -1,5 +1,7 @@
 use std::{cell::Cell, collections::HashMap, env::ArgsOs, ops::Range, rc::Rc};
 
+use by_address::ByAddress;
+
 use crate::{
     backend::type_pool::{TypeKey, TypePool},
     backend::types::{FieldDef, SculkType, StructDef},
@@ -7,33 +9,40 @@ use crate::{
     parser::{Operation, ParserNode, ParserNodeKind},
 };
 
-use super::{function::{FunctionSignature, ParamDef}, resolve::{self, Resolver, ResolutionError, Resolution}};
+use super::{
+    function::{FunctionSignature, ParamDef},
+    resolve::{self, ResolvedPart, ResolutionError, Resolver, Resolution},
+};
 
 // The validation stage happens right after the parser produces an AST
 // In this phase, we perform type checking, make sure statements don't appear illegally (e.g break when not in a loop),
 // and collect struct definitions and function declarations
-pub struct Validator {
+pub struct Validator<'a> {
     pack_name: String,
     global_functions: HashMap<ResourceLocation, FunctionSignature>,
     current_return_type: Option<TypeKey>,
     types: TypePool,
+    tags: TagPool<'a>,
     scope_stack: ScopeStack,
     errors: ValidationErrorList,
+    current_struct: Option<TypeKey>,
 }
 
-impl Validator {
+impl<'a> Validator<'a> {
     pub fn new(pack_name: String) -> Self {
         Self {
             pack_name,
             global_functions: HashMap::new(),
             current_return_type: None,
             types: TypePool::new_with_primitives(),
+            tags: TagPool::new(),
             scope_stack: ScopeStack::new(),
             errors: ValidationErrorList::new(),
+            current_struct: None,
         }
     }
 
-    pub fn validate_program(mut self, ast: &ParserNode) -> ValidatorOutput {
+    pub fn validate_program(mut self, ast: &'a ParserNode) -> ValidatorOutput {
         self.scan_struct_defs(ast.as_program());
         self.scan_func_defs(ast.as_program());
         self.visit_node(ast);
@@ -41,15 +50,16 @@ impl Validator {
         self.dissolve()
     }
 
-    pub fn dissolve(self) -> ValidatorOutput {
+    pub fn dissolve(self) -> ValidatorOutput<'a> {
         ValidatorOutput {
             global_functions: self.global_functions,
             types: self.types,
             errors: self.errors.dissolve(),
+            tags: self.tags,
         }
     }
 
-    fn visit_node(&mut self, node: &ParserNode) -> TypeKey {
+    fn visit_node(&mut self, node: &'a ParserNode) -> TypeKey {
         match node.kind() {
             ParserNodeKind::Program(nodes) => {
                 for node in nodes {
@@ -63,8 +73,15 @@ impl Validator {
                 args,
                 return_ty,
                 body,
-                ..
+                is_static
             } => {
+                if *is_static && self.current_struct.is_none() {
+                    self.errors.add(
+                        ValidationErrorKind::StaticNotAllowed,
+                        node.span(),
+                    );
+                }
+
                 let func_signature = self
                     .global_functions
                     .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
@@ -80,6 +97,10 @@ impl Validator {
                 }
 
                 self.scope_stack.push();
+
+                if !is_static {
+                    self.scope_stack.register_variable("self".to_string(), self.current_struct.unwrap());
+                }
 
                 func_signature.params().iter().for_each(|param| {
                     self.scope_stack
@@ -184,21 +205,28 @@ impl Validator {
             }
             ParserNodeKind::NumberLiteral(_) => self.types.int(),
             ParserNodeKind::BoolLiteral(_) => self.types.bool(),
-            ParserNodeKind::Identifier(ident) => match self.scope_stack.find_variable_type(ident) {
-                Some(ty) => ty,
-                None => {
-                    self.errors.add(
-                        ValidationErrorKind::UnknownVariable(ident.clone()),
-                        node.span(),
-                    );
-                    self.types.unknown()
-                }
-            },
+            ParserNodeKind::Identifier(ident) => {
+                let ty = match self.scope_stack.find_variable_type(ident) {
+                    Some(ty) => ty,
+                    None => {
+                        self.errors.add(
+                            ValidationErrorKind::UnknownVariable(ident.clone()),
+                            node.span(),
+                        );
+                        self.types.unknown()
+                    }
+                };
+
+                self.tags.tag_type(node, ty);
+                ty
+            }
             ParserNodeKind::TypedIdentifier { .. } => unreachable!(),
             ParserNodeKind::VariableDeclaration { name, expr, ty } => {
+                let name = name.as_identifier();
+
                 if self.scope_stack.variable_exists(name) {
                     self.errors.add(
-                        ValidationErrorKind::VariableAlreadyDefined(name.clone()),
+                        ValidationErrorKind::VariableAlreadyDefined(name.to_string()),
                         node.span(),
                     );
                 }
@@ -218,7 +246,6 @@ impl Validator {
                     if specified_type != expr_type {
                         self.errors.add(
                             ValidationErrorKind::VariableAssignmentTypeMismatch {
-                                name: name.clone(),
                                 expected: specified_type,
                                 actual: expr_type.clone(),
                                 expr_span: expr.span(),
@@ -228,19 +255,28 @@ impl Validator {
                     }
                 }
 
-                self.scope_stack.register_variable(name.clone(), expr_type);
+                self.scope_stack.register_variable(name.to_string(), expr_type);
 
                 self.types.none()
             }
-            ParserNodeKind::VariableAssignment { name, expr } => {
+            ParserNodeKind::VariableAssignment { path, expr } => {
+                let resolution = match self.resolver().resolve(path) {
+                    Ok(resolution) => resolution,
+                    Err(err) => {
+                        self.errors
+                            .add(ValidationErrorKind::CouldNotResolve(err), path.span());
+
+                        return self.types.unknown();
+                    }
+                };
+
                 let expr_type = self.visit_node(expr);
 
-                match self.scope_stack.find_variable_type(name) {
+                match resolution.find_assignable_type(&self.types) {
                     Some(ty) => {
                         if ty != expr_type {
                             self.errors.add(
                                 ValidationErrorKind::VariableAssignmentTypeMismatch {
-                                    name: name.clone(),
                                     expected: ty,
                                     actual: expr_type,
                                     expr_span: expr.span(),
@@ -251,12 +287,13 @@ impl Validator {
                     }
                     None => {
                         self.errors.add(
-                            ValidationErrorKind::UnknownVariable(name.clone()),
+                            ValidationErrorKind::NotAssignable,
                             node.span(),
                         );
                     }
                 }
 
+                self.tags.tag_resolution(path, resolution);
                 self.types.none()
             }
             ParserNodeKind::Return(expr) => {
@@ -296,33 +333,39 @@ impl Validator {
                 expr,
                 args: arg_nodes,
             } => {
-                let callee = match Resolver::new(&self.pack_name, &self.global_functions, &self.types, &self.scope_stack).resolve(node) {
+                let callee = match self.resolver().resolve(node) {
                     Ok(resolution) => resolution,
                     Err(err) => {
-                        self.errors.add(ValidationErrorKind::CouldNotResolve(err), node.span());
+                        self.errors
+                            .add(ValidationErrorKind::CouldNotResolve(err), node.span());
                         return self.types.unknown();
                     }
                 };
 
                 let (expected_types, ret_type, param_names) = {
-                    let func_signature = match &callee {
-                        Resolution::GlobalFunction(name) => self.global_functions.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap(),
-                        Resolution::Method(ty, name) => {
-                            ty.from(&self.types).as_struct_def().function(&name).unwrap()
-                        },
-                        Resolution::Constructor(ty) => {
+                    let func_signature = match &callee.last() {
+                        ResolvedPart::GlobalFunction(name) => self
+                            .global_functions
+                            .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
+                            .unwrap(),
+                        ResolvedPart::Method(ty, name) => ty
+                            .from(&self.types)
+                            .as_struct_def()
+                            .function(&name)
+                            .unwrap(),
+                        ResolvedPart::Constructor(ty) => {
                             ty.from(&self.types).as_struct_def().constructor()
-                        },
-                        _ => unreachable!()
+                        }
+                        _ => unreachable!(),
                     };
 
                     let expected_types = func_signature
                         .params()
                         .iter()
-                        .map(|param| param.param_type().clone())
+                        .map(|param| param.param_type())
                         .collect::<Vec<TypeKey>>();
 
-                    let ret_type = func_signature.return_type().clone();
+                    let ret_type = func_signature.return_type();
 
                     let param_names = func_signature
                         .params()
@@ -363,9 +406,16 @@ impl Validator {
                     }
                 }
 
+                self.tags.tag_type(node, ret_type);
+                self.tags.tag_resolution(node, callee);
+
                 ret_type
             }
-            ParserNodeKind::Expression(expr) => self.visit_node(expr),
+            ParserNodeKind::Expression(expr) => {
+                let ty = self.visit_node(expr);
+                self.tags.tag_type(expr, ty);
+                ty
+            }
             ParserNodeKind::Operation(lhs, rhs, op) => {
                 let lhs_type = self.visit_node(lhs);
                 let rhs_type = self.visit_node(rhs);
@@ -388,6 +438,7 @@ impl Validator {
                             );
                         }
 
+                        self.tags.tag_type(node, self.types.bool());
                         return self.types.bool();
                     }
                     Operation::And | Operation::Or => {
@@ -402,6 +453,7 @@ impl Validator {
                             );
                         }
 
+                        self.tags.tag_type(node, self.types.bool());
                         return self.types.bool();
                     }
                     _ => {}
@@ -434,9 +486,11 @@ impl Validator {
                     );
                 }
 
+                self.tags.tag_type(node, lhs_type);
+
                 lhs_type
             }
-            ParserNodeKind::OpEquals { name, expr, .. } => {
+            ParserNodeKind::OpEquals { path, expr, .. } => {
                 let expr_type = self.visit_node(expr);
 
                 if expr_type != self.types.int() {
@@ -446,7 +500,16 @@ impl Validator {
                     );
                 }
 
-                match self.scope_stack.find_variable_type(name) {
+                let resolution = match self.resolver().resolve(path) {
+                    Ok(resolution) => resolution,
+                    Err(err) => {
+                        self.errors
+                            .add(ValidationErrorKind::CouldNotResolve(err), node.span());
+                        return self.types.unknown();
+                    }
+                };
+
+                match resolution.find_assignable_type(&self.types) {
                     Some(ty) => {
                         let ty = ty;
 
@@ -459,7 +522,7 @@ impl Validator {
                     }
                     None => {
                         self.errors.add(
-                            ValidationErrorKind::UnknownVariable(name.clone()),
+                            ValidationErrorKind::NotAssignable,
                             node.span(),
                         );
                     }
@@ -468,29 +531,55 @@ impl Validator {
                 self.types.none()
             }
             ParserNodeKind::MemberAccess { expr, member } => {
-                match Resolver::new(&self.pack_name, &self.global_functions, &self.types, &self.scope_stack).resolve(node) {
-                    Ok(resolution) => match resolution {
-                        Resolution::Field(ty, name) => ty.from(&self.types).as_struct_def().field(&name).unwrap().field_type(),
-                        Resolution::Method(_, _) => {
+                match self.resolver()
+                .resolve(node)
+                {
+                    Ok(resolution) => match resolution.last() {
+                        ResolvedPart::Field(ty, name) => ty
+                            .from(&self.types)
+                            .as_struct_def()
+                            .field(&name)
+                            .unwrap()
+                            .field_type(),
+                        ResolvedPart::Method(_, _) => {
                             self.errors.add(
                                 ValidationErrorKind::CannotReferenceMethodAsValue,
                                 member.span(),
                             );
 
                             return self.types.unknown();
-                        },
-                        _ => unreachable!()
+                        }
+                        _ => unreachable!(),
                     },
                     Err(err) => {
-                        self.errors.add(ValidationErrorKind::CouldNotResolve(err), node.span());
+                        self.errors
+                            .add(ValidationErrorKind::CouldNotResolve(err), node.span());
                         return self.types.unknown();
                     }
                 }
             }
             ParserNodeKind::Unary(expr, _) => self.visit_node(expr),
             ParserNodeKind::CommandLiteral(_) => self.types.none(),
-            ParserNodeKind::StructDefinition { .. } => self.types.none(), // structs are already scanned in advance
+            ParserNodeKind::StructDefinition { name, members } => {
+                self.current_struct = self.types.get_type_key(name);
+
+                for member in members {
+                    self.visit_node(member);
+                }
+
+                self.current_struct = None;
+                self.types.none()
+            }
         }
+    }
+
+    fn resolver(&self) -> Resolver {
+        Resolver::new(
+            &self.pack_name,
+            &self.global_functions,
+            &self.types,
+            &self.scope_stack,
+        )
     }
 
     fn check_node_returns(&self, node: &ParserNode) -> bool {
@@ -581,25 +670,28 @@ impl Validator {
                         args,
                         return_ty,
                         body,
-                        is_static,
+                        is_static
                     } => {
                         let owner = match is_static {
                             true => None,
                             false => Some(struct_type),
                         };
 
-                        let func_signature =
-                            self.create_func_def(owner, member);
+                        let func_signature = self.create_func_def(owner, member);
 
-                        match struct_type.from_mut(&mut self.types).as_struct_def_mut().add_function(func_signature) {
+                        match struct_type
+                            .from_mut(&mut self.types)
+                            .as_struct_def_mut()
+                            .add_function(func_signature)
+                        {
                             Ok(_) => {}
                             Err(_) => self.errors.add(
                                 ValidationErrorKind::FunctionAlreadyDefined(name.clone()),
                                 member.span(),
                             ),
                         }
-                    },
-                    _ => unreachable!()
+                    }
+                    _ => unreachable!(),
                 }
             }
         }
@@ -608,7 +700,7 @@ impl Validator {
         for ((name, fields), nodes) in struct_defs.into_iter().zip(nodes) {
             let struct_type = self.types.get_type_key(name).unwrap();
             let struct_def = struct_type.from(&self.types).as_struct_def();
-            
+
             if struct_def.self_referencing(&self.types) {
                 self.errors.add(
                     ValidationErrorKind::StructSelfReferences(struct_def.name().to_string()),
@@ -655,8 +747,10 @@ impl Validator {
                         );
                     }
 
-                    self.global_functions
-                        .insert(ResourceLocation::new(self.pack_name.clone(), name.clone()), func_signature);
+                    self.global_functions.insert(
+                        ResourceLocation::new(self.pack_name.clone(), name.clone()),
+                        func_signature,
+                    );
                 }
                 _ => unreachable!(),
             }
@@ -723,10 +817,11 @@ impl Validator {
     }
 }
 
-pub struct ValidatorOutput {
+pub struct ValidatorOutput<'a> {
     pub global_functions: HashMap<ResourceLocation, FunctionSignature>,
     pub types: TypePool,
     pub errors: Vec<ValidationError>,
+    pub tags: TagPool<'a>,
 }
 
 #[derive(Clone, Debug)]
@@ -750,7 +845,6 @@ pub enum ValidationErrorKind {
     UnknownFunction(String),
     VariableAlreadyDefined(String),
     VariableAssignmentTypeMismatch {
-        name: String,
         expected: TypeKey,
         actual: TypeKey,
         expr_span: Range<usize>,
@@ -801,6 +895,8 @@ pub enum ValidationErrorKind {
     UnknownType(String),
     CouldNotResolve(ResolutionError),
     CannotReferenceMethodAsValue,
+    NotAssignable,
+    StaticNotAllowed,
 }
 
 pub struct ScopeStack {
@@ -899,5 +995,35 @@ impl ValidationErrorList {
 
     fn dissolve(self) -> Vec<ValidationError> {
         self.0
+    }
+}
+
+pub struct TagPool<'a> {
+    types: HashMap<ByAddress<&'a ParserNode>, TypeKey>,
+    resolutions: HashMap<ByAddress<&'a ParserNode>, Resolution>,
+}
+
+impl<'a> TagPool<'a> {
+    pub fn new() -> Self {
+        Self {
+            types: HashMap::new(),
+            resolutions: HashMap::new(),
+        }
+    }
+
+    pub fn tag_type(&mut self, node: &'a ParserNode, ty: TypeKey) {
+        self.types.insert(ByAddress(node), ty);
+    }
+
+    pub fn tag_resolution(&mut self, node: &'a ParserNode, resolution: Resolution) {
+        self.resolutions.insert(ByAddress(node), resolution);
+    }
+
+    pub fn get_type(&self, node: &'a ParserNode) -> TypeKey {
+        *self.types.get(&ByAddress(node)).unwrap()
+    }
+
+    pub fn get_resolution(&self, node: &'a ParserNode) -> &Resolution {
+        self.resolutions.get(&ByAddress(node)).unwrap()
     }
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range, process::Output, fmt::Display};
+use std::{collections::HashMap, fmt::Display, ops::Range, process::Output};
 
 use crate::lexer::{Token, TokenStream};
 
@@ -18,7 +18,7 @@ pub enum Operation {
     Not,
     Negate,
     And,
-    Or
+    Or,
 }
 
 impl Display for Operation {
@@ -90,6 +90,7 @@ pub enum ParserNodeKind {
         args: Vec<ParserNode>,
         return_ty: Option<String>,
         body: Box<ParserNode>,
+        is_static: bool,
     },
     Return(Option<Box<ParserNode>>),
     FunctionCall {
@@ -118,7 +119,7 @@ pub enum ParserNodeKind {
     },
     StructDefinition {
         name: String,
-        fields: Vec<ParserNode>,
+        members: Vec<ParserNode>,
     },
     MemberAccess {
         expr: Box<ParserNode>,
@@ -149,7 +150,14 @@ impl ParserNode {
     pub fn is_call(&self) -> bool {
         match self.kind {
             ParserNodeKind::FunctionCall { .. } => true,
-            _ => false
+            _ => false,
+        }
+    }
+
+    pub fn is_func_declaration(&self) -> bool {
+        match self.kind {
+            ParserNodeKind::FunctionDeclaration { .. } => true,
+            _ => false,
         }
     }
 
@@ -192,7 +200,21 @@ impl ParserNode {
     pub fn as_function_call(&self) -> (&ParserNode, &[ParserNode]) {
         match &self.kind {
             ParserNodeKind::FunctionCall { expr, args } => (expr, args.as_slice()),
-            _ => panic!("tried to get function call from non-call node")
+            _ => panic!("tried to get function call from non-call node"),
+        }
+    }
+
+    pub fn as_func_name(&self) -> &str {
+        match &self.kind {
+            ParserNodeKind::FunctionDeclaration { name, .. } => &name,
+            _ => panic!("tried to get function name from non-function node"),
+        }
+    }
+
+    pub fn as_func_body(&self) -> &ParserNode {
+        match &self.kind {
+            ParserNodeKind::FunctionDeclaration { body, .. } => body,
+            _ => panic!("tried to get function body from non-function node"),
         }
     }
 }
@@ -223,7 +245,7 @@ impl<'a> Parser<'a> {
 
     fn call(
         &mut self,
-        mut parser: impl for<'b> FnMut(&'b mut Parser<'a>) -> ParserKindResult,
+        mut parser: impl for<'b> FnOnce(&'b mut Parser<'a>) -> ParserKindResult,
     ) -> ParseResult {
         self.current_node_starts
             .push(self.tokens.peeked_span().start);
@@ -243,7 +265,7 @@ impl<'a> Parser<'a> {
 
         while self.tokens.peek().is_some() {
             match self.tokens.peek().unwrap() {
-                Token::Fn => match self.call(Self::parse_func_declaration) {
+                Token::Fn | Token::Static => match self.call(Self::parse_func_declaration) {
                     Ok(stmt) => nodes.push(stmt),
                     Err(_) => continue, // error already logged, continue parsing
                 },
@@ -285,7 +307,7 @@ impl<'a> Parser<'a> {
             match self.tokens.peek().unwrap() {
                 Token::LeftParens => identifier = self.call(|s| s.parse_func_call(identifier))?,
                 Token::Dot => identifier = self.call(|s| s.parse_member_access(identifier))?,
-                _ => break
+                _ => break,
             }
         }
 
@@ -306,10 +328,13 @@ impl<'a> Parser<'a> {
                 let path = self.call(Self::parse_path)?;
 
                 match self.tokens.peek() {
-                    Some(Token::Semicolon) => if !path.is_call() {
-                        self.error("expected a function call before ;") } else {
+                    Some(Token::Semicolon) => {
+                        if !path.is_call() {
+                            self.error("expected a function call before ;")
+                        } else {
                             Ok(path.kind)
                         }
+                    }
                     Some(Token::Equals) => self.parse_var_assignment(path),
                     Some(Token::AddEquals)
                     | Some(Token::SubtractEquals)
@@ -350,21 +375,11 @@ impl<'a> Parser<'a> {
 
         let expr = self.call(Self::parse_expression)?;
 
-        match identifier.kind {
-            ParserNodeKind::TypedIdentifier { name, ty } => {
-                Ok(ParserNodeKind::VariableDeclaration {
-                    name: Box::new(identifier),
-                    expr: Box::new(expr),
-                    ty: Some(ty),
-                })
-            }
-            ParserNodeKind::Identifier(name) => Ok(ParserNodeKind::VariableDeclaration {
-                name: Box::new(identifier),
-                expr: Box::new(expr),
-                ty: None,
-            }),
-            _ => self.error("expected identifier"),
-        }
+        Ok(ParserNodeKind::VariableDeclaration {
+            name: Box::new(identifier),
+            expr: Box::new(expr),
+            ty: None,
+        })
     }
 
     fn parse_var_assignment(&mut self, path: ParserNode) -> ParserKindResult {
@@ -379,6 +394,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_func_declaration(&mut self) -> ParserKindResult {
+        let is_static = match self.tokens.peek() {
+            Some(Token::Static) => {
+                self.tokens.next(); // consume the static
+                true
+            }
+            _ => false,
+        };
+
         expect_tok!(self, Token::Fn, "expected fn");
 
         let name = self.call(Self::parse_identifier)?;
@@ -418,6 +441,7 @@ impl<'a> Parser<'a> {
             args,
             return_ty,
             body: Box::new(body),
+            is_static
         })
     }
 
@@ -456,13 +480,19 @@ impl<'a> Parser<'a> {
 
         expect_tok!(self, Token::RightParens, "expected )");
 
-        Ok(ParserNodeKind::FunctionCall { expr: Box::new(callee), args })
+        Ok(ParserNodeKind::FunctionCall {
+            expr: Box::new(callee),
+            args,
+        })
     }
 
     fn parse_member_access(&mut self, expr: ParserNode) -> ParserKindResult {
         self.tokens.next(); // consume the .
         let member = self.call(Self::parse_identifier)?;
-        Ok(ParserNodeKind::MemberAccess { expr: Box::new(expr), member: Box::new(member) })
+        Ok(ParserNodeKind::MemberAccess {
+            expr: Box::new(expr),
+            member: Box::new(member),
+        })
     }
 
     fn parse_if(&mut self) -> ParserKindResult {
@@ -590,7 +620,7 @@ impl<'a> Parser<'a> {
         while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
                 Token::Or => Operation::Or,
-                _ => break
+                _ => break,
             };
 
             self.tokens.next();
@@ -612,7 +642,7 @@ impl<'a> Parser<'a> {
         while self.tokens.peek().is_some() {
             let op = match self.tokens.peek().unwrap() {
                 Token::And => Operation::And,
-                _ => break
+                _ => break,
             };
 
             self.tokens.next();
@@ -831,7 +861,7 @@ impl<'a> Parser<'a> {
 
         Ok(ParserNodeKind::StructDefinition {
             name: name.as_identifier().to_string(),
-            fields,
+            members: fields,
         })
     }
 

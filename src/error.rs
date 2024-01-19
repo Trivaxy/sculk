@@ -1,10 +1,16 @@
-use std::{io, collections::HashMap};
+use std::{collections::HashMap, io};
 
-use ariadne::{Report, ReportKind, Label, Color, Source, Fmt};
+use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 
 use crate::{
-    backend::{type_pool::TypePool, validate::{ValidationError, ValidationErrorKind}, function::FunctionSignature, resolve::{ResolutionError, Resolution}},
-    parser::ParseError, data::ResourceLocation,
+    backend::{resolve::ResolvedPart,
+        function::FunctionSignature,
+        resolve::{Resolution, ResolutionError},
+        type_pool::TypePool,
+        validate::{ValidationError, ValidationErrorKind},
+    },
+    data::ResourceLocation,
+    parser::ParseError,
 };
 
 pub enum CompileError {
@@ -29,7 +35,7 @@ pub fn print_report(
     file_content: &str,
     error: &CompileError,
     type_pool: &TypePool,
-    signatures: &HashMap<ResourceLocation, FunctionSignature>
+    signatures: &HashMap<ResourceLocation, FunctionSignature>,
 ) {
     let offset = match error {
         CompileError::Parse(error) => error.span.end,
@@ -80,12 +86,12 @@ pub fn print_report(
                         .with_message("a variable with this name already exists in this scope")
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
-                ValidationErrorKind::VariableAssignmentTypeMismatch { name, expected, actual, expr_span } => {
+                ValidationErrorKind::VariableAssignmentTypeMismatch { expected, actual, expr_span } => {
                     report
                         .with_message(format!("attempted to assign a value of type '{}' to a variable of type '{}'", actual.fg(Color::Cyan), expected.fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone()))
                             .with_color(Color::Cyan)
-                            .with_message(format!("'{}' is of type '{}' ...", name.fg(Color::Green), expected.fg(Color::Cyan))))
+                            .with_message(format!("this is of type '{}' ...", expected.fg(Color::Cyan))))
                         .with_label(Label::new((file_name, expr_span.clone()))
                             .with_color(Color::Red)
                             .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
@@ -187,12 +193,12 @@ pub fn print_report(
                             .with_label(Label::new((file_name, error.span.clone()))
                                 .with_color(Color::Red)
                                 .with_message(format!("candidates: {}", candidates.iter().map(|c| match c {
-                                    Resolution::Variable(ty) => format!("- variable '{}'", name.fg(Color::Green)),
-                                    Resolution::GlobalFunction(name) => format!("global function '{}'", name.fg(Color::Green)),
-                                    Resolution::Type(ty) => format!("- type '{}'", name.fg(Color::Green)),
-                                    Resolution::Field(ty, name) => format!("- field '{}' of type '{}'", name.fg(Color::Green), ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan)),
-                                    Resolution::Method(ty, name) => format!("- method '{}' of type '{}'", name.fg(Color::Green), ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan)),
-                                    Resolution::Constructor(ty) => format!("- constructor of type '{}'", name.fg(Color::Cyan)),
+                                    ResolvedPart::Variable(ty, name) => format!("- variable '{}'", name.fg(Color::Green)),
+                                    ResolvedPart::GlobalFunction(name) => format!("global function '{}'", name.fg(Color::Green)),
+                                    ResolvedPart::Type(ty) => format!("- type '{}'", name.fg(Color::Green)),
+                                    ResolvedPart::Field(ty, name) => format!("- field '{}' of type '{}'", name.fg(Color::Green), ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan)),
+                                    ResolvedPart::Method(ty, name) => format!("- method '{}' of type '{}'", name.fg(Color::Green), ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan)),
+                                    ResolvedPart::Constructor(ty) => format!("- constructor of type '{}'", name.fg(Color::Cyan)),
                                 }).collect::<Vec<String>>().join("\n"))))
                     }
                     ResolutionError::UnresolvedIdentifier(name) => {
@@ -221,10 +227,26 @@ pub fn print_report(
                             .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                     }
                 }
-                ValidationErrorKind::CannotReferenceMethodAsValue => todo!(),
+                ValidationErrorKind::CannotReferenceMethodAsValue => {
+                    report
+                        .with_message("cannot reference a method as a value")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::NotAssignable => {
+                    report
+                        .with_message("not assignable")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::StaticNotAllowed => {
+                    report
+                        .with_message("static functions can only exist inside struct definitions")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
             }
         }
     }
 
-    report.finish().print((file_name, Source::from(file_content)));
+    report
+        .finish()
+        .print((file_name, Source::from(file_content)));
 }

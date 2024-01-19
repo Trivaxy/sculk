@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    fmt::Display,
-};
+use std::{collections::HashMap, fmt::Display};
 
 use crate::backend::types::SculkType;
 
@@ -14,14 +11,14 @@ use super::function::{FunctionSignature, ParamDef};
 #[derive(Debug)]
 pub struct TypePool {
     type_map: HashMap<String, usize>,
-    types: Vec<SculkType>
+    types: Vec<SculkType>,
 }
 
 impl TypePool {
     fn new() -> Self {
         Self {
             type_map: HashMap::new(),
-            types: Vec::new()
+            types: Vec::new(),
         }
     }
 
@@ -42,10 +39,14 @@ impl TypePool {
         if let SculkType::Struct(ref mut def) = ty {
             def.set_constructor(FunctionSignature::new(
                 ".ctor".to_string(),
-                def.fields().iter().map(|f| ParamDef::new(f.name().to_string(), f.field_type().clone())).collect(),
+                def.fields()
+                    .map(|f| ParamDef::new(f.name().to_string(), f.field_type()))
+                    .collect(),
                 TypeKey(idx_in_pool),
                 true,
             ));
+
+            def.finalize(self);
         }
 
         self.types.push(ty);
@@ -69,9 +70,7 @@ impl TypePool {
     }
 
     pub fn get_type_key(&self, name: &str) -> Option<TypeKey> {
-        self.type_map
-            .get(name)
-            .map(|id| TypeKey(*id))
+        self.type_map.get(name).map(|id| TypeKey(*id))
     }
 
     pub fn has_type(&self, name: &str) -> bool {

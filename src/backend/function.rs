@@ -1,7 +1,4 @@
-use crate::parser::{ParserNode, ParserNodeKind};
-
-use super::{type_pool::{TypeKey, TypePool}, types::StructDef, validate::ScopeStack};
-use std::{hash::{Hash, Hasher}, collections::HashMap};
+use super::type_pool::TypeKey;
 
 /// Represents a Sculk function's signature.
 /// A signature consists of the function's name, its argument parameters, and its return type.

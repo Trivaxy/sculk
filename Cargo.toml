@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 argh = "0.1.12"
 ariadne = "0.3.0"
+by_address = "1.1.0"
+indexmap = "2.1.0"
 logos = "0.12.1"

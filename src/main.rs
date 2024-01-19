@@ -58,8 +58,7 @@ fn main() {
         };
 
         for func in compiled_funcs {
-            let (location, file_content) = func.finalize();
-            let namespace_path = Path::new(&config.pack).join(location.namespace.clone());
+            let namespace_path = Path::new(&config.pack);
 
             if let Err(err) = std::fs::create_dir_all(&namespace_path) {
                 println!("failed to create namespace directory: {}", err);
@@ -68,16 +67,16 @@ fn main() {
 
             if let Err(err) = std::fs::write(
                 namespace_path
-                    .join(location.path)
+                    .join(func.name().path.clone())
                     .with_extension("mcfunction"),
-                file_content,
+                func.to_string()
             ) {
                 println!("failed to write function file: {}", err);
                 return;
             }
         }
     }
-    
+
     for (file, errs, info) in errors {
         let info = info.expect("info should be present if there are errors");
         let file_content = match std::fs::read_to_string(file) {
@@ -140,35 +139,37 @@ fn compile_file(
         config.pack.clone(),
         validator_output.types,
         validator_output.global_functions,
+        validator_output.tags
     );
+
     ir_compiler.visit_program(parser_output.ast.as_program());
 
-    let (signatures, types, funcs) = ir_compiler.dissolve();
+    let (signatures, types, tags, funcs) = ir_compiler.dissolve();
 
     if errors.is_empty() && config.dump_ir {
-        dump_ir(&signatures, &funcs);
+        dump_ir(&config, &signatures, &funcs);
     }
 
-    let codegen = CodeGen::new(config.pack.clone(), signatures, types);
-    let final_output = codegen.generate(&funcs);
+    let mut codegen = CodeGen::new(config.pack.clone());
+    codegen.compile_ir_functions(&funcs);
 
-    let (signatures, types) = codegen.dissolve();
+    let final_output = codegen.dissolve();
 
     (Some(Info { types, signatures }), Ok(final_output))
 }
 
-fn dump_ir(signatures: &HashMap<ResourceLocation, FunctionSignature>, funcs: &[IrFunction]) {
+fn dump_ir(config: &Config, signatures: &HashMap<ResourceLocation, FunctionSignature>, funcs: &[IrFunction]) {
     let mut s = String::new();
 
     for func in funcs {
         s.push_str(
             format!(
                 "fn {}({}) -> {}",
-                func.name(),
+                func.objective(),
                 signatures
                     .get(&ResourceLocation::new(
-                        String::from("pack"),
-                        func.name().to_owned()
+                        config.pack.clone(),
+                        func.objective().0.clone(),
                     ))
                     .unwrap()
                     .params()
@@ -178,8 +179,8 @@ fn dump_ir(signatures: &HashMap<ResourceLocation, FunctionSignature>, funcs: &[I
                     .join(", "),
                 signatures
                     .get(&ResourceLocation::new(
-                        String::from("pack"),
-                        func.name().to_owned()
+                        config.pack.clone(),
+                        func.objective().0.clone(),
                     ))
                     .unwrap()
                     .return_type()

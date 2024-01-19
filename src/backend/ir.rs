@@ -1,66 +1,155 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    data::ResourceLocation,
+    data::{Objective, ResourceLocation, ScoreboardSlot, ScoreboardOperationType},
     parser::{Operation, ParserNode, ParserNodeKind},
 };
 
-use super::{function::FunctionSignature, type_pool::{TypePool, TypeKey}, types::FieldDef, resolve::{Resolver, Resolution}, validate::ScopeStack};
+use super::{
+    function::FunctionSignature,
+    resolve::{Resolution, ResolvedPart, Resolver},
+    type_pool::{TypeKey, TypePool},
+    types::{FieldDef, SculkType, StructDef},
+    validate::{ScopeStack, TagPool},
+};
 
-/// The instructions that make up Sculk's Intermediate Representation (IR).
-/// These are generated during the IR generation phase of compilation, where the AST is compiled to IR.
-/// If compiled in release, the IR is analyzed and optimized before being sent to the output phase.
-/// In debug compilations the IR is sent straight to the output phase without any optimization.
-///
-/// Sculk's IR is stack-based, and is kept simple intentionally.
-/// At this stage of compilation, information about parameter and local names is lost.
-#[derive(Debug, PartialEq)]
+#[derive(Clone)]
+pub struct ValueLocation {
+    slot: usize,
+    offset: usize,
+    objective: Objective,
+}
+
+impl ValueLocation {
+    fn new(slot: usize, offset: usize, objective: Objective) -> Self {
+        Self {
+            slot,
+            offset,
+            objective,
+        }
+    }
+
+    fn dummy() -> Self {
+        Self {
+            slot: 0,
+            offset: 0,
+            objective: Objective(String::new()),
+        }
+    }
+}
+
+impl Display for ValueLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let offset = if self.offset == 0 { String::new() } else { format!(">{}", self.offset) };
+        write!(f, "{}{}", self.slot, if self.offset == 0 { "" } else { &offset })
+    }
+}
+
+impl From<ValueLocation> for ScoreboardSlot {
+    fn from(loc: ValueLocation) -> Self {
+        let offset = if loc.offset == 0 { String::new() } else { format!(">{}", loc.offset) };
+        ScoreboardSlot::new(loc.objective.clone(), format!("v{}{}", loc.slot, offset))
+    }
+}
+
+impl From<&ValueLocation> for ScoreboardSlot {
+    fn from(loc: &ValueLocation) -> Self {
+        Self::from(loc.clone())
+    }
+}
+
+pub enum BinaryOperation {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    CheckEquals,
+    NotEquals,
+    GreaterThan,
+    GreaterThanOrEquals,
+    LessThan,
+    LessThanOrEquals,
+    And,
+    Or,
+}
+
+impl Display for BinaryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use BinaryOperation::*;
+
+        match self {
+            Add => write!(f, "+"),
+            Subtract => write!(f, "-"),
+            Multiply => write!(f, "*"),
+            Divide => write!(f, "/"),
+            Modulo => write!(f, "%"),
+            CheckEquals => write!(f, "=="),
+            NotEquals => write!(f, "!="),
+            GreaterThan => write!(f, ">"),
+            GreaterThanOrEquals => write!(f, ">="),
+            LessThan => write!(f, "<"),
+            LessThanOrEquals => write!(f, "<="),
+            And => write!(f, "&&"),
+            Or => write!(f, "||"),
+        }
+    }
+}
+
 pub enum Instruction {
-    PushInteger(i32),                           // pushes an integer onto the stack
-    PushBoolean(bool),                          // pushes a boolean onto the stack
-    PushLocal(usize),                           // pushes a local value with the given index onto the stack
-    StoreLocal(usize),                          // pops a value off the stack and stores it in the local with the given index
-    Add,                                        // pops two integers off the stack, adds them, and pushes the result onto the stack
-    Subtract,                                   // pops two integers off the stack, subtracts them, and pushes the result onto the stack
-    Multiply,                                   // pops two integers off the stack, multiplies them, and pushes the result onto the stack
-    Divide,                                     // pops two integers off the stack, divides them, and pushes the result onto the stack
-    Modulo,                                     // pops two integers off the stack, mods them, and pushes the result onto the stack
-    Equal,                                      // pops two values off the stack, compares them for equality, and pushes the resulting boolean onto the stack
-    NotEqual,                                   // pops two integers off the stack, compares them for inequality, and pushes the resulting boolean onto the stack
-    GreaterThan,                                // pops two integers off the stack, compares them for greater-than, and pushes the resulting boolean onto the stack
-    LessThan,                                   // pops two integers off the stack, compares them for less-than, and pushes the resulting boolean onto the stack
-    GreaterThanOrEqual,                         // pops two integers off the stack, compares them for greater-than-or-equal, and pushes the resulting boolean onto the stack
-    LessThanOrEqual,                            // pops two integers off the stack, compares them for less-than-or-equal, and pushes the resulting boolean onto the stack
-    And,                                        // pops two booleans off the stack, ands them, and pushes the resulting boolean onto the stack
-    Or,                                         // pops two booleans off the stack, ors them, and pushes the resulting boolean onto the stack
-    Not,                                        // pops a boolean off the stack, negates it, and pushes the resulting boolean onto the stack
-    Return,                                     // returns from the function
-    Break,                                      // breaks out of the current block
-    CallGlobal(ResourceLocation),               // pops arguments from the stack and calls the global function at the given location
-    CallMethod(TypeKey, usize),                 // pops arguments from the stack and calls the method at the given index for the given type                      
-    // Explanation: In Sculk IR any form of control flow happens via jumping in and out of blocks
-    // There is no branching/jumping directly into a label/offset since that is hellish to accomplish in Minecraft
-    // For example, consider: if x < 5 { broadcast(y); }
-    // This would compile into:
-    //  startblock         // start a new block
-    //  pushlocal 1 # y
-    //  call broadcast
-    //  endblock           // <-- a reference to this block is now on the stack
-    //  pushlocal 0 # x
-    //  pushinteger 5
-    //  lessthan
-    //  jumpinif           // pop a condition off the stack, pop the block off the stack, jump into the block if the condition is true
-    //
-    // The boolean value represents whether or not the block is actually a loop. This is needed to make break statements function properly
-    StartBlock(bool),
-    EndBlock,
-    JumpInIf,                                   // pops a boolean off the stack, pops a block, and jumps into the block if the condition is true
-    JumpInEither,                               // pops a boolean off the stack, pops the else block, pops the if block, and jumps into one of the blocks depending on the condition
-    RepeatIf,                                   // only valid when inside a block. pops a boolean and jumps to the block's start if true
-    EmitCommandLiteral(String),                 // hacks
-    Construct(TypeKey),                         // pops arguments from the stack and calls the constructor for the given type, pushes the instance onto the stack
-    PushField(usize),                           // pops a struct off the stack and pushes the field at the given index onto the stack
-    StoreField(usize),                          // pops a struct and value off the stack and stores it in the field at the given index
+    // Sets target to the value of source
+    SetValueToValue {
+        source: ValueLocation,
+        target: ValueLocation,
+    },
+    // Sets target to a raw integer value
+    SetValueToConstant {
+        target: ValueLocation,
+        constant: i32,
+    },
+    // Performs target = target <op> source
+    ValueBinaryOperation {
+        source: ValueLocation,
+        target: ValueLocation,
+        op: BinaryOperation,
+    },
+    // Performs target = !target. This assumes a boolean representation
+    ToggleValue {
+        target: ValueLocation,
+    },
+    // Performs target += <value>. value can be negative
+    ModifyValue {
+        target: ValueLocation,
+        value: i32,
+    },
+    // Returns from the function
+    Return {
+        source: Option<ValueLocation>,
+        size: usize, // the size of the return value
+    },
+    // Keeps jumping out of blocks until the encapsulating loop block is found
+    Break,
+    // Calls a function at the given location
+    Call {
+        function: ResourceLocation,
+    },
+    // Creates a new block with the given ID and body of instructions. is_loop indicates if it stops a break's propagation
+    CreateBlock {
+        id: usize,
+        is_loop: bool,
+        body: Vec<Instruction>,
+    },
+    // Jumps to the start of the block with the given ID
+    EnterBlock {
+        id: usize,
+    },
+    // Conditionally executes a block if source == value
+    IfValueMatchesRunBlock {
+        source: ValueLocation,
+        value: i32,
+        block: usize,
+    },
+    PlaceCommandLiteral(String),
 }
 
 impl Display for Instruction {
@@ -68,37 +157,37 @@ impl Display for Instruction {
         use Instruction::*;
 
         match self {
-            PushInteger(n) => write!(f, "pushinteger {}", n),
-            PushBoolean(b) => write!(f, "pushboolean {}", b),
-            PushLocal(idx) => write!(f, "pushlocal {}", idx),
-            StoreLocal(idx) => write!(f, "storelocal {}", idx),
-            Add => write!(f, "add"),
-            Subtract => write!(f, "subtract"),
-            Multiply => write!(f, "multiply"),
-            Divide => write!(f, "divide"),
-            Modulo => write!(f, "modulo"),
-            Equal => write!(f, "equal"),
-            NotEqual => write!(f, "notequal"),
-            GreaterThan => write!(f, "greaterthan"),
-            LessThan => write!(f, "lessthan"),
-            GreaterThanOrEqual => write!(f, "greaterthanorequal"),
-            LessThanOrEqual => write!(f, "lessthanorequal"),
-            And => write!(f, "and"),
-            Or => write!(f, "or"),
-            Not => write!(f, "not"),
-            Return => write!(f, "return"),
+            SetValueToValue { source, target } => {
+                write!(f, "set T({}) = S({})", target, source)
+            }
+            SetValueToConstant { target, constant } => {
+                write!(f, "set T({}) = {}", target, constant)
+            }
+            ValueBinaryOperation { source, target, op } => {
+                write!(f, "op T({}) = T({}) {} S({})", target, target, op, source)
+            }
+            ToggleValue { target } => write!(f, "op T({}) = !T({})", target, target),
+            ModifyValue { target, value } => write!(f, "op T({}) += {}", target, value),
+            Return { source, size } => write!(f, "return{}", match source {
+                Some(source) => format!(" S({}) SIZE={}", source, size),
+                None => String::new(),
+            }),
             Break => write!(f, "break"),
-            CallGlobal(name) => write!(f, "callglobal {}", name),
-            CallMethod(ty, idx) => write!(f, "callmethod {}.{}", ty, idx),
-            StartBlock(is_loop) => write!(f, "startblock [loop={}]", is_loop),
-            EndBlock => write!(f, "endblock"),
-            JumpInIf => write!(f, "jumpinif"),
-            JumpInEither => write!(f, "jumpineither"),
-            RepeatIf => write!(f, "repeatif"),
-            EmitCommandLiteral(cmd) => write!(f, "emitcommandliteral {}", cmd),
-            Construct(type_key) => write!(f, "construct {}", type_key),
-            PushField(idx) => write!(f, "pushfield {}", idx),
-            StoreField(idx) => write!(f, "storefield {}", idx),
+            Call { function } => write!(f, "call {}", function),
+            CreateBlock { id, is_loop, body } => {
+                write!(f, "block {} (loop: {})", id, is_loop)?;
+
+                for instr in body {
+                    write!(f, "\n    {}", instr)?;
+                }
+
+                Ok(())
+            }
+            EnterBlock { id } => write!(f, "enter B({})", id),
+            IfValueMatchesRunBlock { source, value, block } => {
+                write!(f, "if S({}) == {} then block {}", source, value, block)
+            }
+            PlaceCommandLiteral(cmd) => write!(f, "/{}", cmd),
         }
     }
 }
@@ -107,26 +196,29 @@ impl Display for Instruction {
 /// At this point, the program is assumed to be sound, so the IrCompiler doesn't do any verification.
 /// This type will take in the validated AST, as well as the global function signatures and types constructed during validation.
 /// All functions will be compiled to their intermediate representation, before the final step (CodeGen) is run.
-pub struct IrCompiler {
+pub struct IrCompiler<'a> {
     pack_name: String,
     types: TypePool,
     global_functions: HashMap<ResourceLocation, FunctionSignature>,
-    builder: IrFunctionBuilder,
+    tags: TagPool<'a>,
     compiled_funcs: Vec<IrFunction>,
+    next_block_id: usize,
 }
 
-impl IrCompiler {
+impl<'a> IrCompiler<'a> {
     pub fn new(
         pack_name: String,
         types: TypePool,
         global_functions: HashMap<ResourceLocation, FunctionSignature>,
+        tags: TagPool<'a>,
     ) -> Self {
         Self {
             pack_name,
             types,
             global_functions,
-            builder: IrFunctionBuilder::new(),
+            tags,
             compiled_funcs: Vec::new(),
+            next_block_id: 0,
         }
     }
 
@@ -135,158 +227,490 @@ impl IrCompiler {
     ) -> (
         HashMap<ResourceLocation, FunctionSignature>,
         TypePool,
+        TagPool<'a>,
         Vec<IrFunction>,
     ) {
-        (self.global_functions, self.types, self.compiled_funcs)
+        (
+            self.global_functions,
+            self.types,
+            self.tags,
+            self.compiled_funcs,
+        )
     }
 
     // Takes in the top-level node in the AST which is typically just a vector of functions and their bodies
     // In the future this will account for top-level statements as well
-    pub fn visit_program(&mut self, program: &[ParserNode]) {
+    pub fn visit_program(&mut self, program: &'a [ParserNode]) {
         for node in program {
             match node.kind() {
-                ParserNodeKind::FunctionDeclaration {
-                    name,
-                    body,
-                    ..
-                } => {
-                    let func = self.compile_function(name.to_owned(), body.as_block());
-                    self.compiled_funcs.push(func);
+                ParserNodeKind::FunctionDeclaration { name, body, .. } => {
+                    let mut builder = IrFunctionBuilder::new(
+                        self.global_functions.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap(),
+                        Objective(name.clone()),
+                        self.pack_name.clone(),
+                        &self.global_functions,
+                        &self.types,
+                        &self.tags
+                    );
+
+                    builder.visit_node(body);
+
+                    self.compiled_funcs.push(builder.finish());
                 }
-                ParserNodeKind::StructDefinition { .. } => {} // nothing to be done
+                ParserNodeKind::StructDefinition { name, members } => {
+                    for method in members.iter().filter(|m| m.is_func_declaration()) {
+                        let mut builder = IrFunctionBuilder::new(
+                            self.types.get_type_key(name).unwrap().from(&self.types).as_struct_def().function(method.as_func_name()).unwrap(),
+                            Objective(format!("{}.{}", name, method.as_func_name())),
+                            self.pack_name.clone(),
+                            &self.global_functions,
+                            &self.types,
+                            &self.tags
+                        );
+
+                        builder.visit_node(method.as_func_body());
+
+                        self.compiled_funcs.push(builder.finish());
+                    }
+                }
                 _ => unreachable!(),
             }
         }
     }
+}
 
-    // Takes in a function's name and its respective body in the AST, and compiles it into Sculk IR
-    fn compile_function(&mut self, name: String, body: &[ParserNode]) -> IrFunction {
-        self.builder.begin(
-            self.global_functions
-                .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
-                .unwrap(),
-        );
+/// A function that has been compiled into Sculk IR.
+pub struct IrFunction {
+    objective: Objective,
+    body: Vec<Instruction>,
+}
 
+impl IrFunction {
+    fn new(objective: Objective, body: Vec<Instruction>) -> Self {
+        Self {
+            objective,
+            body
+        }
+    }
+
+    pub fn objective(&self) -> &Objective {
+        &self.objective
+    }
+
+    pub fn body(&self) -> &[Instruction] {
+        &self.body
+    }
+}
+
+/// A helper struct that assists in building Sculk IR functions.
+struct IrFunctionBuilder<'a> {
+    body: Vec<Instruction>,
+    locals: HashMap<String, usize>,
+    next_slot: usize,
+    blocks: Vec<Vec<Instruction>>,
+    next_block_id: usize,
+    signature: &'a FunctionSignature,
+    objective: Objective,
+    pack_name: String,
+    global_functions: &'a HashMap<ResourceLocation, FunctionSignature>,
+    types: &'a TypePool,
+    tags: &'a TagPool<'a>,
+}
+
+impl<'a> IrFunctionBuilder<'a> {
+    fn new(signature: &'a FunctionSignature, objective: Objective, pack_name: String, global_functions: &'a HashMap<ResourceLocation, FunctionSignature>, types: &'a TypePool, tags: &'a TagPool) -> Self {
+        let mut s = Self {
+            body: Vec::new(),
+            locals: HashMap::new(),
+            next_slot: 0,
+            blocks: Vec::new(),
+            next_block_id: 0,
+            signature,
+            objective,
+            pack_name,
+            global_functions,
+            types,
+            tags
+        };
+
+        // Give the first local indices to the function parameters
+        for (idx, param) in signature.params().iter().enumerate() {
+            s.locals.insert(param.name().to_owned(), idx);
+        }
+
+        s
+    }
+
+    fn finish(self) -> IrFunction {
+        IrFunction::new(self.objective, self.body)
+    }
+
+    fn emit(&mut self, instr: Instruction) {
+        match self.blocks.last_mut() {
+            Some(block) => block.push(instr),
+            None => self.body.push(instr),
+        }
+    }
+
+    fn emit_value_copy(
+        &mut self,
+        target_slot: usize,
+        source_slot: usize,
+        target_offset: usize,
+        source_offset: usize,
+        size: usize,
+    ) {
+        for i in 0..size {
+            let source = ValueLocation::new(source_slot, source_offset + i, self.objective.clone());
+            let target = ValueLocation::new(target_slot, target_offset + i, self.objective.clone());
+
+            self.emit(Instruction::SetValueToValue { source, target });
+        }
+    }
+
+    fn get_local(&mut self, name: &str) -> ValueLocation {
+        match self.locals.get(name) {
+            Some(idx) => ValueLocation::new(*idx, 0, self.objective.clone()),
+            None => {
+                let idx = self.locals.len();
+                self.locals.insert(name.to_owned(), idx);
+                ValueLocation::new(idx, 0, self.objective.clone())
+            }
+        }
+    }
+
+    fn get_free_location(&mut self) -> ValueLocation {
+        let slot = self.next_slot;
+        self.next_slot += 1;
+        ValueLocation::new(slot, 0, self.objective.clone())
+    }
+
+    fn create_block(is_loop: bool, builder: &mut Self, emitted: impl FnOnce(usize, &mut Self)) -> usize {
+        let id = builder.next_block_id;
+        builder.next_block_id += 1;
+
+        builder.blocks.push(Vec::new());
+
+        emitted(id, builder);
+
+        let body = builder.blocks.pop().unwrap();
+
+        builder.emit(Instruction::CreateBlock {
+            id,
+            is_loop,
+            body
+        });
+
+        id
+    }
+
+    // Takes in a function's name, signature and its respective body in the AST, and compiles it into Sculk IR
+    fn compile_function(&mut self, body: &'a [ParserNode]) {
         for node in body {
             self.visit_node(node);
         }
-
-        self.builder.finish()
     }
 
-    fn visit_node(&mut self, node: &ParserNode) {
+    fn visit_node(&mut self, node: &ParserNode) -> ValueLocation {
         match node.kind() {
             ParserNodeKind::NumberLiteral(n) => self.visit_number_literal(*n),
             ParserNodeKind::BoolLiteral(b) => self.visit_bool_literal(*b),
             ParserNodeKind::Identifier(name) => self.visit_identifier(name),
             ParserNodeKind::VariableDeclaration { name, expr, .. } => {
-                self.visit_variable_store(name, expr)
+                self.visit_variable_declaration(name.as_identifier(), expr);
+                ValueLocation::dummy()
             }
             ParserNodeKind::VariableAssignment { path, expr } => {
-                self.visit_variable_store(path, expr)
+                self.visit_variable_assignment(path, expr);
+                ValueLocation::dummy()
             }
             ParserNodeKind::Expression(expr) => self.visit_node(expr),
             ParserNodeKind::Operation(lhs, rhs, op) => self.visit_binary_operation(lhs, rhs, *op),
             ParserNodeKind::Unary(expr, op) => self.visit_unary_operation(expr, *op),
             ParserNodeKind::OpEquals { path, expr, op } => {
-                self.visit_operation_equals(path, expr, *op)
+                self.visit_operation_equals(path, expr, *op);
+                ValueLocation::dummy()
             }
-            ParserNodeKind::FunctionCall { .. } => self.visit_function_call(node),
-            ParserNodeKind::Block(body) => self.visit_block(body),
-            ParserNodeKind::Return(expr) => self.visit_return(expr),
-            ParserNodeKind::Break => self.builder.emit(Instruction::Break),
+            ParserNodeKind::FunctionCall { .. } => match self.visit_function_call(node) {
+                Some(target) => target,
+                None => ValueLocation::dummy(),
+            }
+            ParserNodeKind::Block(body) => {
+                self.visit_block(body);
+                ValueLocation::dummy()
+            }
+            ParserNodeKind::Return(expr) => {
+                self.visit_return(expr);
+                ValueLocation::dummy()
+            }
+            ParserNodeKind::Break => {
+                self.emit(Instruction::Break);
+                ValueLocation::dummy()
+            }
             ParserNodeKind::If {
                 cond,
                 body,
                 else_body,
                 ..
-            } => self.visit_if(cond, body, else_body),
+            } => {
+                self.visit_if(cond, body, else_body);
+                ValueLocation::dummy()
+            }
             ParserNodeKind::For {
                 init,
                 cond,
                 step,
                 body,
-            } => self.visit_for(init, cond, step, body),
-            ParserNodeKind::CommandLiteral(cmd) => self
-                .builder
-                .emit(Instruction::EmitCommandLiteral(cmd.to_owned())),
-            ParserNodeKind::MemberAccess { expr, member } => self.visit_member_access(expr, member.as_identifier()),
+            } => {
+                self.visit_for(init, cond, step, body);
+                ValueLocation::dummy()
+            }
+            ParserNodeKind::CommandLiteral(cmd) => {
+                self.emit(Instruction::PlaceCommandLiteral(cmd.to_owned()));
+                ValueLocation::dummy()
+            }
+            ParserNodeKind::MemberAccess { expr, member } => {
+                self.visit_member_access(expr, member.as_identifier())
+            }
             // the below nodes don't need any work, they've been handled by previous phases of compilation
-            ParserNodeKind::Program(_) => {}
-            ParserNodeKind::TypedIdentifier { .. } => {}
-            ParserNodeKind::FunctionDeclaration { .. } => {}
-            ParserNodeKind::StructDefinition { .. } => {}
+            ParserNodeKind::Program(_) => ValueLocation::dummy(),
+            ParserNodeKind::TypedIdentifier { .. } => ValueLocation::dummy(),
+            ParserNodeKind::FunctionDeclaration { .. } => ValueLocation::dummy(),
+            ParserNodeKind::StructDefinition { .. } => ValueLocation::dummy(),
         }
     }
 
-    fn visit_number_literal(&mut self, n: i32) {
-        self.builder.emit(Instruction::PushInteger(n));
+    fn visit_number_literal(&mut self, n: i32) -> ValueLocation {
+        let target = self.get_free_location();
+
+        self.emit(Instruction::SetValueToConstant {
+            target: target.clone(),
+            constant: n,
+        });
+
+        target
     }
 
-    fn visit_bool_literal(&mut self, b: bool) {
-        self.builder.emit(Instruction::PushBoolean(b));
+    fn visit_bool_literal(&mut self, b: bool) -> ValueLocation {
+        let target = self.get_free_location();
+
+        self.emit(Instruction::SetValueToConstant {
+            target: target.clone(),
+            constant: if b { 1 } else { 0 },
+        });
+
+        target
     }
 
-    fn visit_identifier(&mut self, name: &str) {
-        let idx = self.builder.get_local_index(name);
-        self.builder.emit(Instruction::PushLocal(idx));
+    fn visit_identifier(&mut self, name: &str) -> ValueLocation {
+        let source = self.get_local(name);
+        let target = self.get_free_location();
+
+        self.emit(Instruction::SetValueToValue { source, target: target.clone() });
+
+        target
     }
 
-    fn visit_variable_store(&mut self, path: &ParserNode, expr: &ParserNode) {
-        self.visit_node(expr);
+    fn visit_variable_declaration(&mut self, name: &str, expr: &ParserNode) {
+        let source = self.visit_node(expr);
+        let target = self.get_local(name);
 
-        let idx = self.builder.get_local_index(name);
-        self.builder.emit(Instruction::StoreLocal(idx));
+        self.emit_value_copy(
+            target.slot,
+            source.slot,
+            target.offset,
+            source.offset,
+            self.tags.get_type(expr).from(&self.types).total_size(&self.types)
+        );
     }
 
-    fn visit_binary_operation(&mut self, lhs: &ParserNode, rhs: &ParserNode, op: Operation) {
-        self.visit_node(lhs);
-        self.visit_node(rhs);
+    fn visit_variable_assignment(&mut self, path: &ParserNode, expr: &ParserNode) {
+        let source = self.visit_node(expr);
+        let resolution = self.tags.get_resolution(path);
+        let target = self.resolve_location(resolution);
 
-        let instr = Self::op_to_instr(op);
-
-        self.builder.emit(instr);
+        self.emit_value_copy(
+            target.slot,
+            source.slot,
+            target.offset,
+            source.offset,
+            self.tags.get_type(expr).from(&self.types).total_size(&self.types)
+        );
     }
 
-    fn visit_unary_operation(&mut self, expr: &ParserNode, op: Operation) {
-        self.visit_node(expr);
+    fn visit_binary_operation(
+        &mut self,
+        lhs: &ParserNode,
+        rhs: &ParserNode,
+        op: Operation,
+    ) -> ValueLocation {
+        let op = match op {
+            Operation::Add => BinaryOperation::Add,
+            Operation::Subtract => BinaryOperation::Subtract,
+            Operation::Multiply => BinaryOperation::Multiply,
+            Operation::Divide => BinaryOperation::Divide,
+            Operation::Modulo => BinaryOperation::Modulo,
+            Operation::CheckEquals => BinaryOperation::CheckEquals,
+            Operation::NotEquals => BinaryOperation::NotEquals,
+            Operation::GreaterThan => BinaryOperation::GreaterThan,
+            Operation::GreaterThanOrEquals => BinaryOperation::GreaterThanOrEquals,
+            Operation::LessThan => BinaryOperation::LessThan,
+            Operation::LessThanOrEquals => BinaryOperation::LessThanOrEquals,
+            Operation::And => BinaryOperation::And,
+            Operation::Or => BinaryOperation::Or,
+            _ => unreachable!(),
+        };
+
+        let target = self.visit_node(lhs);
+        let source = self.visit_node(rhs);
+
+        self.emit(Instruction::ValueBinaryOperation { source, target: target.clone(), op });
+
+        target
+    }
+
+    fn visit_unary_operation(&mut self, expr: &ParserNode, op: Operation) -> ValueLocation {
+        let target = self.visit_node(expr);
 
         match op {
             Operation::Negate => {
-                self.builder.emit(Instruction::PushInteger(-1));
-                self.builder.emit(Instruction::Multiply);
+                let n = self.get_free_location();
+
+                self.emit(Instruction::SetValueToConstant {
+                    target: n.clone(),
+                    constant: -1,
+                });
+
+                self.emit(Instruction::ValueBinaryOperation {
+                    source: n,
+                    target: target.clone(),
+                    op: BinaryOperation::Multiply,
+                });
             }
-            Operation::Not => self.builder.emit(Instruction::Not),
+            Operation::Not => {
+                self.emit(Instruction::ToggleValue { target: target.clone() });
+            }
             _ => unreachable!(),
         }
+
+        target
     }
 
     fn visit_operation_equals(&mut self, path: &ParserNode, expr: &ParserNode, op: Operation) {
-        let idx = self.builder.get_local_index(name);
-        self.builder.emit(Instruction::PushLocal(idx));
+        let resolution = self.tags.get_resolution(path);
+        let target = self.resolve_location(resolution);
+        let source = self.visit_node(expr);
 
-        self.visit_node(expr);
+        let op = match op {
+            Operation::Add => BinaryOperation::Add,
+            Operation::Subtract => BinaryOperation::Subtract,
+            Operation::Multiply => BinaryOperation::Multiply,
+            Operation::Divide => BinaryOperation::Divide,
+            Operation::Modulo => BinaryOperation::Modulo,
+            _ => unreachable!(),
+        };
 
-        let instr = Self::op_to_instr(op);
-        self.builder.emit(instr);
-
-        self.builder.emit(Instruction::StoreLocal(idx));
+        self.emit(Instruction::ValueBinaryOperation { source, target, op });
     }
 
-    fn visit_function_call(&mut self, node: &ParserNode) {
+    fn visit_function_call(&mut self, node: &ParserNode) -> Option<ValueLocation> {
         let (expr, args) = node.as_function_call();
 
         self.visit_node(expr);
 
-        for arg in args {
-            self.visit_node(arg);
+        let args: Vec<ValueLocation> = args.iter().map(|arg| self.visit_node(arg)).collect();
+        let resolution = self.tags.get_resolution(node);
+        let mut func_objective = Objective(String::new());
+        let mut handle_return = false;
+
+        match resolution.last() {
+            ResolvedPart::GlobalFunction(name) => {
+                let func_location = ResourceLocation::new(self.pack_name.clone(), name.clone());
+                let func_signature = self.global_functions.get(&func_location).unwrap();
+
+                func_objective = Objective(name.clone());
+
+                for (i, (param, arg)) in func_signature.params().iter().zip(args).enumerate() {
+                    let target = ValueLocation::new(i, 0, func_objective.clone());
+
+                    self.emit_value_copy(
+                        target.slot,
+                        arg.slot,
+                        target.offset,
+                        arg.offset,
+                        param.param_type().from(&self.types).total_size(&self.types)
+                    );
+                }
+
+                handle_return = func_signature.return_type() != self.types.none();
+            }
+            ResolvedPart::Method(ty, name) => {
+                let struct_def = ty.from(&self.types).as_struct_def();
+                let method_signature = struct_def.function(name).unwrap();
+
+                func_objective = Objective(format!("{}.{}", struct_def.name(), name));
+
+                for (i, (param, arg)) in method_signature.params().iter().zip(args).enumerate() {
+                    let target = ValueLocation::new(i, 0, func_objective.clone());
+
+                    self.emit_value_copy(
+                        target.slot,
+                        arg.slot,
+                        target.offset,
+                        arg.offset,
+                        param.param_type().from(&self.types).total_size(&self.types)
+                    );
+                }
+
+                handle_return = method_signature.return_type() != self.types.none();
+            }
+            ResolvedPart::Constructor(ty) => {
+                let struct_def = ty.from(&self.types).as_struct_def();
+
+                func_objective = Objective(struct_def.name().to_string());
+
+                for (i, (param, arg)) in struct_def
+                    .constructor()
+                    .params()
+                    .iter()
+                    .zip(args)
+                    .enumerate()
+                {
+                    let target = ValueLocation::new(i, 0, func_objective.clone());
+
+                    self.emit_value_copy(
+                        target.slot,
+                        arg.slot,
+                        target.offset,
+                        arg.offset,
+                        param.param_type().from(&self.types).total_size(&self.types)
+                    );
+                }
+
+                handle_return = true;
+            }
+            _ => unreachable!(),
         }
 
-        match Resolver::new(&self.pack_name, &self.global_functions, &self.types, &ScopeStack::empty()).resolve(node).unwrap() {
-            Resolution::GlobalFunction(name) => self.builder.emit(Instruction::CallGlobal(ResourceLocation::new(self.pack_name.to_string(), name))),
-            Resolution::Method(ty, name) => self.builder.emit(Instruction::CallMethod(ty, ty.from(&self.types).as_struct_def().function_idx(&name).unwrap())),
-            Resolution::Constructor(ty) => self.builder.emit(Instruction::Construct(ty)),
-            _ => unreachable!(),
+        self.emit(Instruction::Call {
+            function: ResourceLocation::new(self.pack_name.clone(), func_objective.0.clone()),
+        });
+
+        if handle_return {
+            let target = self.get_free_location();
+            let source = ValueLocation::new(0, 0, Objective(format!("{}.return", func_objective.0)));
+
+            self.emit_value_copy(
+                target.slot,
+                source.slot,
+                target.offset,
+                source.offset,
+                self.tags.get_type(node).from(&self.types).total_size(&self.types)
+            );
+
+            Some(target)
+        } else {
+            None
         }
     }
 
@@ -297,11 +721,32 @@ impl IrCompiler {
     }
 
     fn visit_return(&mut self, expr: &Option<Box<ParserNode>>) {
-        if let Some(expr) = expr {
-            self.visit_node(expr);
-        }
+        match expr {
+            Some(expr) => {
+                let source = self.visit_node(expr);
+                let target = ValueLocation::new(0, 0, Objective(format!("{}.return", self.objective.clone())));
+                let size = self.tags.get_type(expr).from(&self.types).total_size(&self.types);
 
-        self.builder.emit(Instruction::Return);
+                self.emit_value_copy(
+                    target.slot,
+                    source.slot,
+                    target.offset,
+                    source.offset,
+                    size
+                );
+
+                self.emit(Instruction::Return {
+                    source: Some(target),
+                    size
+                });
+            }
+            None => {
+                self.emit(Instruction::Return {
+                    source: None,
+                    size: 0
+                });
+            }
+        }
     }
 
     fn visit_if(
@@ -310,22 +755,33 @@ impl IrCompiler {
         body: &ParserNode,
         else_body: &Option<Box<ParserNode>>,
     ) {
-        self.builder.emit(Instruction::StartBlock(false));
-        self.visit_node(body);
-        self.builder.emit(Instruction::EndBlock);
+        let true_body = Self::create_block(false, self, |_, builder| {
+            builder.visit_node(body);
+        });
+        
+        let else_body = else_body.as_ref().map(|else_body| {
+            Self::create_block(false, self,|_, builder| {
+                builder.visit_node(else_body);
+            })
+        });
 
-        if let Some(else_body) = else_body {
-            self.builder.emit(Instruction::StartBlock(false));
-            self.visit_node(else_body);
-            self.builder.emit(Instruction::EndBlock);
-        }
+        let cond = self.visit_node(cond);
 
-        self.visit_node(cond);
+        self.emit(Instruction::IfValueMatchesRunBlock {
+            source: cond.clone(),
+            value: 1,
+            block: true_body,
+        });
 
-        if else_body.is_some() {
-            self.builder.emit(Instruction::JumpInEither);
-        } else {
-            self.builder.emit(Instruction::JumpInIf);
+        match else_body {
+            Some(else_body) => {
+                self.emit(Instruction::IfValueMatchesRunBlock {
+                    source: cond,
+                    value: 0,
+                    block: else_body,
+                });
+            }
+            None => {}
         }
     }
 
@@ -338,134 +794,64 @@ impl IrCompiler {
     ) {
         self.visit_node(init);
 
-        self.builder.emit(Instruction::StartBlock(true));
+        let looping_body = Self::create_block(true, self, |id, builder| {
+            builder.visit_node(body);
+            builder.visit_node(step);
 
-        self.visit_node(body);
-        self.visit_node(step);
-        self.visit_node(cond);
-        self.builder.emit(Instruction::RepeatIf);
+            let cond = builder.visit_node(cond);
 
-        self.builder.emit(Instruction::EndBlock);
+            builder.emit(Instruction::IfValueMatchesRunBlock {
+                source: cond,
+                value: 1,
+                block: id,
+            });
+        });
 
-        self.visit_node(cond);
-        self.builder.emit(Instruction::JumpInIf);
+        let cond = self.visit_node(cond);
+        self.emit(Instruction::IfValueMatchesRunBlock {
+            source: cond,
+            value: 1,
+            block: looping_body,
+        });
     }
 
-    fn visit_member_access(&mut self, expr: &ParserNode, member: &str) {
-        self.visit_node(expr);
+    fn visit_member_access(&mut self, expr: &ParserNode, member: &str) -> ValueLocation {
+        let source = self.visit_node(expr);
+        let target = self.get_free_location();
+        let expr_type = self.tags.get_type(expr).from(&self.types).as_struct_def();
 
-        match Resolver::new(&self.pack_name, &self.global_functions, &self.types, &ScopeStack::empty()).resolve(expr).unwrap() {
-            Resolution::Variable(ty) => {
-                let struct_def = ty.from(&self.types).as_struct_def();
+        self.emit_value_copy(
+            target.slot,
+            source.slot,
+            target.offset,
+            source.offset + expr_type.field_offset(member),
+            self.types.get_type_key(member).unwrap().from(&self.types).total_size(&self.types)
+        );
 
-                if let Some(field_idx) = struct_def.field_idx(member) {
-                    self.builder.emit(Instruction::PushField(field_idx));
-                } else {
-                    unreachable!()
+        target
+    }
+
+    fn resolve_location(&mut self, resolution: &Resolution) -> ValueLocation {
+        let mut offset = 0;
+        let mut slot = 0;
+
+        for part in resolution.iter() {
+            match part {
+                ResolvedPart::Variable(_, name) => {
+                    slot = self.get_local(name).slot;
                 }
-            },
-            Resolution::Field(ty, name) => {
-                let struct_def = ty.from(&self.types).as_struct_def();
-                let field_type_def = struct_def.field(&name).unwrap().field_type().from(&self.types).as_struct_def();
-
-                if let Some(field_idx) = field_type_def.field_idx(member) {
-                    self.builder.emit(Instruction::PushField(field_idx));
-                } else {
-                    unreachable!()
+                ResolvedPart::Field(ty, name) => {
+                    let struct_def = ty.from(&self.types).as_struct_def();
+                    offset += struct_def.field_offset(name);
                 }
-            },
-            _ => unreachable!(),
-        }
-    }
-
-    fn op_to_instr(op: Operation) -> Instruction {
-        match op {
-            Operation::Add => Instruction::Add,
-            Operation::Subtract => Instruction::Subtract,
-            Operation::Multiply => Instruction::Multiply,
-            Operation::Divide => Instruction::Divide,
-            Operation::Modulo => Instruction::Modulo,
-            Operation::CheckEquals => Instruction::Equal,
-            Operation::NotEquals => Instruction::NotEqual,
-            Operation::GreaterThan => Instruction::GreaterThan,
-            Operation::LessThan => Instruction::LessThan,
-            Operation::GreaterThanOrEquals => Instruction::GreaterThanOrEqual,
-            Operation::LessThanOrEquals => Instruction::LessThanOrEqual,
-            Operation::And => Instruction::And,
-            Operation::Or => Instruction::Or,
-            Operation::Not
-            | Operation::Negate => unreachable!() // handled by visit_unary_operation
-        }
-    }
-}
-
-/// A function that has been compiled into Sculk IR.
-pub struct IrFunction {
-    name: String,
-    body: Vec<Instruction>,
-}
-
-impl IrFunction {
-    fn new(name: String) -> Self {
-        Self {
-            name,
-            body: Vec::new(),
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn body(&self) -> &[Instruction] {
-        &self.body
-    }
-}
-
-/// A helper struct that assists in building Sculk IR functions.
-struct IrFunctionBuilder {
-    function: Option<IrFunction>,
-    locals: HashMap<String, usize>,
-}
-
-impl IrFunctionBuilder {
-    fn new() -> Self {
-        Self {
-            function: None,
-            locals: HashMap::new(),
-        }
-    }
-
-    fn begin(&mut self, signature: &FunctionSignature) {
-        self.function = Some(IrFunction::new(signature.name().to_owned()));
-        self.locals.clear();
-
-        // Give the first local indices to the function parameters
-        for (idx, param) in signature.params().iter().enumerate() {
-            self.locals.insert(param.name().to_owned(), idx);
-        }
-    }
-
-    fn emit(&mut self, instr: Instruction) {
-        self.function
-            .as_mut()
-            .expect("not building any function")
-            .body
-            .push(instr);
-    }
-
-    fn finish(&mut self) -> IrFunction {
-        self.function.take().expect("not building any function")
-    }
-
-    fn get_local_index(&mut self, name: &str) -> usize {
-        match self.locals.get(name) {
-            Some(idx) => *idx,
-            None => {
-                let idx = self.locals.len();
-                self.locals.insert(name.to_owned(), idx);
-                idx
+                _ => unreachable!(),
             }
         }
+
+        ValueLocation::new(
+            slot,
+            offset,
+            self.objective.clone(),
+        )
     }
 }

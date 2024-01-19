@@ -1,6 +1,11 @@
-use std::{cell::Ref, fmt::Display};
+use std::{cell::Ref, fmt::Display, ops::Index};
 
-use super::{type_pool::{TypeKey, TypePool}, function::FunctionSignature};
+use indexmap::IndexMap;
+
+use super::{
+    function::FunctionSignature,
+    type_pool::{TypeKey, TypePool},
+};
 
 /// The definition of a type in Sculk. These will end up inside a TypePool when the program is validated.
 #[derive(Debug, Clone)]
@@ -40,6 +45,17 @@ impl SculkType {
             _ => panic!("type is not a struct"),
         }
     }
+
+    pub fn total_size(&self, types: &TypePool) -> usize {
+        match self {
+            SculkType::Integer | SculkType::Bool => 1,
+            SculkType::Struct(def) => match def.field_offsets.last() {
+                Some(last) => last + def.fields.index(def.fields.len() - 1).ty.from(types).total_size(types),
+                None => 0,
+            },
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl PartialEq for SculkType {
@@ -73,46 +89,57 @@ impl Display for SculkType {
 #[derive(Debug, Clone)]
 pub struct StructDef {
     name: String,
-    fields: Vec<FieldDef>,
-    functions: Vec<FunctionSignature>,
+    fields: IndexMap<String, FieldDef>,
+    functions: IndexMap<String, FunctionSignature>,
     // Typically never None, but Option is needed since the constructor is added only after the struct is registered in a type pool
     constructor: Option<FunctionSignature>,
+    field_offsets: Vec<usize>,
 }
 
 impl StructDef {
     pub fn new_empty(name: String) -> Self {
         Self {
             name,
-            fields: Vec::new(),
-            functions: Vec::new(),
+            fields: IndexMap::new(),
+            functions: IndexMap::new(),
             constructor: None, // this will be set upon registration
+            field_offsets: Vec::new(),
         }
     }
 
     pub fn add_field(&mut self, field: FieldDef) -> Result<(), ()> {
-        if self.fields.iter().any(|f| f.name == field.name) {
+        if self.fields.get(&field.name).is_some() {
             return Err(());
         }
 
-        self.fields.push(field);
+        self.fields.insert(field.name.clone(), field);
 
         Ok(())
     }
 
     pub fn add_function(&mut self, function: FunctionSignature) -> Result<(), ()> {
-        if self.functions.iter().any(|f| f.name() == function.name()) {
+        if self.functions.get(function.name()).is_some() {
             return Err(());
         }
 
-        self.functions.push(function);
+        self.functions.insert(function.name().to_string(), function);
 
         Ok(())
+    }
+
+    pub fn finalize(&mut self, types: &TypePool) {
+        let mut offset = 0;
+
+        for field in self.fields.values() {
+            self.field_offsets.push(offset);
+            offset += field.ty.from(types).total_size(types);
+        }
     }
 
     pub fn self_referencing(&self, types: &TypePool) -> bool {
         let mut field_types = self
             .fields
-            .iter()
+            .values()
             .map(|f| f.ty.clone())
             .collect::<Vec<TypeKey>>();
 
@@ -124,7 +151,7 @@ impl StructDef {
                     return true;
                 }
 
-                field_types.extend(def.fields.iter().map(|f| f.ty.clone()));
+                field_types.extend(def.fields.values().map(|f| f.ty.clone()));
             }
         }
 
@@ -135,28 +162,24 @@ impl StructDef {
         &self.name
     }
 
-    pub fn fields(&self) -> &[FieldDef] {
-        &self.fields
-    }
-
-    pub fn functions(&self) -> &[FunctionSignature] {
-        &self.functions
-    }
-
     pub fn field(&self, name: &str) -> Option<&FieldDef> {
-        self.fields.iter().find(|f| f.name == name)
+        self.fields.get(name)
     }
 
     pub fn field_idx(&self, name: &str) -> Option<usize> {
-        self.fields.iter().position(|f| f.name == name)
+        self.fields.get_index_of(name)
+    }
+
+    pub fn fields(&self) -> impl Iterator<Item = &FieldDef> {
+        self.fields.values()
     }
 
     pub fn function(&self, name: &str) -> Option<&FunctionSignature> {
-        self.functions.iter().find(|f| f.name() == name)
+        self.functions.get(name)
     }
 
     pub fn function_idx(&self, name: &str) -> Option<usize> {
-        self.functions.iter().position(|f| f.name() == name)
+        self.functions.get_index_of(name)
     }
 
     pub fn constructor(&self) -> &FunctionSignature {
@@ -166,6 +189,10 @@ impl StructDef {
     pub fn set_constructor(&mut self, constructor: FunctionSignature) {
         assert!(self.constructor.is_none());
         self.constructor = Some(constructor);
+    }
+
+    pub fn field_offset(&self, name: &str) -> usize {
+        self.field_offsets[self.field_idx(name).unwrap()]
     }
 }
 

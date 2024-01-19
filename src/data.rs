@@ -1,28 +1,9 @@
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Clone)]
-pub struct ScoreboardEntry {
-    pub scoreboard: ResourceLocation,
-    pub name: String,
-}
-
-impl ScoreboardEntry {
-    pub fn new(scoreboard: ResourceLocation, name: String) -> Self {
-        Self { scoreboard, name }
-    }
-}
-
-impl Display for ScoreboardEntry {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#{} {}", self.name, self.scoreboard)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ResourceLocation {
     pub namespace: String,
     pub path: String,
-    pub separator: char,
 }
 
 impl ResourceLocation {
@@ -30,32 +11,38 @@ impl ResourceLocation {
         Self {
             namespace,
             path,
-            separator: ':',
-        }
-    }
-
-    pub fn with_separator(&self, separator: char) -> Self {
-        Self {
-            namespace: self.namespace.clone(),
-            path: self.path.clone(),
-            separator,
         }
     }
 }
 
 impl Display for ResourceLocation {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}{}", self.namespace, self.separator, self.path)
+        write!(f, "{}:{}", self.namespace, self.path)
+    }
+}
+
+#[derive(Clone)]
+pub struct Objective(pub String);
+
+impl Objective {
+    pub fn new(name: String) -> Self {
+        Self(name)
+    }
+}
+
+impl Display for Objective {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
 pub struct ScoreboardSlot {
-    pub objective: String,
+    pub objective: Objective,
     pub entry: String,
 }
 
 impl ScoreboardSlot {
-    pub fn new(objective: String, entry: String) -> Self {
+    pub fn new(objective: Objective, entry: String) -> Self {
         Self { objective, entry }
     }
 }
@@ -63,5 +50,27 @@ impl ScoreboardSlot {
 impl Display for ScoreboardSlot {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} {}", self.entry, self.objective)
+    }
+}
+
+pub enum ScoreboardOperationType {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Set, // add the others when i feel like it
+}
+
+impl Display for ScoreboardOperationType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScoreboardOperationType::Add => write!(f, "+="),
+            ScoreboardOperationType::Subtract => write!(f, "-="),
+            ScoreboardOperationType::Multiply => write!(f, "*="),
+            ScoreboardOperationType::Divide => write!(f, "/="),
+            ScoreboardOperationType::Modulo => write!(f, "%="),
+            ScoreboardOperationType::Set => write!(f, "="),
+        }
     }
 }
