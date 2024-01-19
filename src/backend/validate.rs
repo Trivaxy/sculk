@@ -220,7 +220,7 @@ impl<'a> Validator<'a> {
                 self.tags.tag_type(node, ty);
                 ty
             }
-            ParserNodeKind::TypedIdentifier { .. } => unreachable!(),
+            ParserNodeKind::TypedIdentifier { .. } => self.types.none(),
             ParserNodeKind::VariableDeclaration { name, expr, ty } => {
                 let name = name.as_identifier();
 
