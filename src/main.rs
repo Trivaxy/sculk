@@ -65,10 +65,11 @@ fn main() {
                 return;
             }
 
+            dbg!(func.name());
+
             if let Err(err) = std::fs::write(
-                namespace_path
-                    .join(func.name().path.clone())
-                    .with_extension("mcfunction"),
+                format!("{}.mcfunction", namespace_path
+                    .join(func.name().path.clone()).display()),
                 func.to_string()
             ) {
                 println!("failed to write function file: {}", err);
