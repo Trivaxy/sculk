@@ -161,6 +161,13 @@ impl ParserNode {
         }
     }
 
+    pub fn is_typed_identifier(&self) -> bool {
+        match self.kind {
+            ParserNodeKind::TypedIdentifier { .. } => true,
+            _ => false,
+        }
+    }
+
     fn as_num(&self) -> i32 {
         match self.kind {
             ParserNodeKind::NumberLiteral(num) => num,
@@ -845,23 +852,23 @@ impl<'a> Parser<'a> {
 
         expect_tok!(self, Token::LeftBrace, "expected {");
 
-        let mut fields = Vec::new();
+        let mut members = Vec::new();
 
         while self.tokens.peek() != Some(&Token::RightBrace) {
-            let field = self.call(|parser| parser.parse_typed_identifier(true))?;
+            let member = match self.tokens.peek() {
+                Some(Token::Identifier(_)) => self.call(|parser| parser.parse_typed_identifier(false))?,
+                Some(Token::Static) | Some(Token::Fn) => self.call(|parser| parser.parse_func_declaration())?,
+                _ => return self.error("expected field, function declaration, or }")
+            };
 
-            if self.tokens.peek() != Some(&Token::RightBrace) {
-                expect_tok!(self, Token::Comma, "expected , or }");
-            }
-
-            fields.push(field);
+            members.push(member);
         }
 
         expect_tok!(self, Token::RightBrace, "expected }");
 
         Ok(ParserNodeKind::StructDefinition {
             name: name.as_identifier().to_string(),
-            members: fields,
+            members,
         })
     }
 
