@@ -113,9 +113,6 @@ pub enum Token<'a> {
     #[token("static")]
     Static,
 
-    #[token("self")]
-    Self_,
-
     #[regex(r"true|false", |tok| tok.slice().parse())]
     Bool(bool),
 
