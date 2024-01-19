@@ -40,14 +40,14 @@ impl ValueLocation {
 
 impl Display for ValueLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let offset = if self.offset == 0 { String::new() } else { format!(">{}", self.offset) };
+        let offset = if self.offset == 0 { String::new() } else { format!("_{}", self.offset) };
         write!(f, "{}{}", self.slot, if self.offset == 0 { "" } else { &offset })
     }
 }
 
 impl From<ValueLocation> for ScoreboardSlot {
     fn from(loc: ValueLocation) -> Self {
-        let offset = if loc.offset == 0 { String::new() } else { format!(">{}", loc.offset) };
+        let offset = if loc.offset == 0 { String::new() } else { format!("_{}", loc.offset) };
         ScoreboardSlot::new(loc.objective.clone(), format!("v{}{}", loc.slot, offset))
     }
 }
