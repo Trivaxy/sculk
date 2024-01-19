@@ -70,10 +70,9 @@ impl<'a> Validator<'a> {
             }
             ParserNodeKind::FunctionDeclaration {
                 name,
-                args,
-                return_ty,
                 body,
-                is_static
+                is_static,
+                ..
             } => {
                 if *is_static && self.current_struct.is_none() {
                     self.errors.add(
@@ -82,10 +81,10 @@ impl<'a> Validator<'a> {
                     );
                 }
 
-                let func_signature = self
-                    .global_functions
-                    .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
-                    .unwrap();
+                let func_signature = match self.current_struct {
+                    Some(ty) => ty.from(&self.types).as_struct_def().function(name).unwrap(),
+                    None => self.global_functions.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap(),
+                };
 
                 self.current_return_type = Some(func_signature.return_type());
 
@@ -98,7 +97,7 @@ impl<'a> Validator<'a> {
 
                 self.scope_stack.push();
 
-                if !is_static {
+                if !is_static && self.current_struct.is_some() {
                     self.scope_stack.register_variable("self".to_string(), self.current_struct.unwrap());
                 }
 
