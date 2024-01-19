@@ -65,8 +65,6 @@ fn main() {
                 return;
             }
 
-            dbg!(func.name());
-
             if let Err(err) = std::fs::write(
                 format!("{}.mcfunction", namespace_path
                     .join(func.name().path.clone()).display()),
