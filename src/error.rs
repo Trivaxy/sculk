@@ -34,7 +34,7 @@ pub fn print_report(
     file_name: &str,
     file_content: &str,
     error: &CompileError,
-    type_pool: &TypePool,
+    types: &TypePool,
     signatures: &HashMap<ResourceLocation, FunctionSignature>,
 ) {
     let offset = match error {
@@ -59,17 +59,17 @@ pub fn print_report(
                 }
                 ValidationErrorKind::ExpectedBoolInIf(ty) => {
                     report
-                        .with_message(format!("an if statement's condition must be of type '{}'", type_pool.bool().fg(Color::Cyan)))
+                        .with_message(format!("an if statement's condition must be of type '{}'", types.bool().from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone()))
                             .with_color(Color::Red)
-                            .with_message(format!("... but '{}' was given instead", ty.fg(Color::Cyan))))
+                            .with_message(format!("... but '{}' was given instead", ty.from(types).fg(Color::Cyan))))
                 }
                 ValidationErrorKind::ExpectedBoolInForCondition(ty) => {
                     report
-                        .with_message(format!("a for loop's condition must be of type '{}'", type_pool.bool().fg(Color::Cyan)))
+                        .with_message(format!("a for loop's condition must be of type '{}'", types.bool().from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone()))
                             .with_color(Color::Red)
-                            .with_message(format!("... but '{}' was given instead", ty.fg(Color::Cyan))))
+                            .with_message(format!("... but '{}' was given instead", ty.from(types).fg(Color::Cyan))))
                 }
                 ValidationErrorKind::UnknownVariable(_) => {
                     report
@@ -88,24 +88,24 @@ pub fn print_report(
                 }
                 ValidationErrorKind::VariableAssignmentTypeMismatch { expected, actual, expr_span } => {
                     report
-                        .with_message(format!("attempted to assign a value of type '{}' to a variable of type '{}'", actual.fg(Color::Cyan), expected.fg(Color::Cyan)))
+                        .with_message(format!("attempted to assign a value of type '{}' to a variable of type '{}'", actual.from(types).fg(Color::Cyan), expected.from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone()))
                             .with_color(Color::Cyan)
-                            .with_message(format!("this is of type '{}' ...", expected.fg(Color::Cyan))))
+                            .with_message(format!("this is of type '{}' ...", expected.from(types).fg(Color::Cyan))))
                         .with_label(Label::new((file_name, expr_span.clone()))
                             .with_color(Color::Red)
-                            .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
+                            .with_message(format!("... but this expression is of type '{}'", actual.from(types).fg(Color::Cyan))))
                 }
                 ValidationErrorKind::ReturnTypeMismatch { expected, actual, expr_span } => {
                     report
-                        .with_message(format!("expected a return type of '{}'", expected.fg(Color::Cyan)))
+                        .with_message(format!("expected a return type of '{}'", expected.from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, expr_span.clone()))
                             .with_color(Color::Red)
-                            .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
+                            .with_message(format!("... but this expression is of type '{}'", actual.from(types).fg(Color::Cyan))))
                 }
                 ValidationErrorKind::ReturnValueExpected(expected) => {
                     report
-                        .with_message(format!("expected a return value of type '{}'", expected.fg(Color::Cyan)))
+                        .with_message(format!("expected a return value of type '{}'", expected.from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
                 ValidationErrorKind::NotAllPathsReturn => {
@@ -115,10 +115,10 @@ pub fn print_report(
                 }
                 ValidationErrorKind::FunctionCallArgTypeMismatch { name, expected, actual } => {
                     report
-                        .with_message(format!("incorrect argument type, the type of parameter '{}' is '{}'", name.fg(Color::Green), expected.fg(Color::Cyan)))
+                        .with_message(format!("incorrect argument type, the type of parameter '{}' is '{}'", name.fg(Color::Green), expected.from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone()))
                             .with_color(Color::Red)
-                            .with_message(format!("... but this expression is of type '{}'", actual.fg(Color::Cyan))))
+                            .with_message(format!("... but this expression is of type '{}'", actual.from(types).fg(Color::Cyan))))
                 }
                 ValidationErrorKind::NotEnoughArguments { missing, callee_span } => {
                     report
@@ -129,18 +129,18 @@ pub fn print_report(
                 }
                 ValidationErrorKind::OperationTypeMismatch { lhs, rhs, op } => {
                     report
-                        .with_message(format!("cannot apply operator {} to operands of type '{}' and '{}'", op.fg(Color::Yellow), lhs.fg(Color::Cyan), rhs.fg(Color::Cyan)))
+                        .with_message(format!("cannot apply operator {} to operands of type '{}' and '{}'", op.fg(Color::Yellow), lhs.from(types).fg(Color::Cyan), rhs.from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
                 ValidationErrorKind::ComparisonOperatorTypeMismatch { lhs, rhs, op } => {
                     report
                         .with_message(format!("comparison operators such as {} can only be applied to numeric operands of the same type", op.fg(Color::Yellow)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
-                        .with_note(format!("the only numeric types are '{}' and soon '{}'", type_pool.int().fg(Color::Cyan), "fixed".fg(Color::Cyan)))
+                        .with_note(format!("the only numeric types are '{}' and soon '{}'", types.int().from(types).fg(Color::Cyan), "fixed".fg(Color::Cyan)))
                 }
                 ValidationErrorKind::ArithmeticUnsupported { ty } => {
                     report
-                        .with_message(format!("arithmetic operations are not valid for type '{}'", ty.fg(Color::Cyan)))
+                        .with_message(format!("arithmetic operations are not valid for type '{}'", ty.from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
                 ValidationErrorKind::FunctionAlreadyDefined(name) => {
@@ -183,7 +183,7 @@ pub fn print_report(
                 }
                 ValidationErrorKind::LogicalOperatorTypeMismatch { lhs, rhs, op } => {
                     report
-                        .with_message(format!("logical operators such as {} can only be applied to operands of type '{}'", op.fg(Color::Yellow), type_pool.bool().fg(Color::Cyan)))
+                        .with_message(format!("logical operators such as {} can only be applied to operands of type '{}'", op.fg(Color::Yellow), types.bool().from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
                 ValidationErrorKind::CouldNotResolve(res_error) => match res_error {
@@ -196,8 +196,8 @@ pub fn print_report(
                                     ResolvedPart::Variable(ty, name) => format!("- variable '{}'", name.fg(Color::Green)),
                                     ResolvedPart::GlobalFunction(name) => format!("global function '{}'", name.fg(Color::Green)),
                                     ResolvedPart::Type(ty) => format!("- type '{}'", name.fg(Color::Green)),
-                                    ResolvedPart::Field(ty, name) => format!("- field '{}' of type '{}'", name.fg(Color::Green), ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan)),
-                                    ResolvedPart::Method(ty, name) => format!("- method '{}' of type '{}'", name.fg(Color::Green), ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan)),
+                                    ResolvedPart::Field(ty, name) => format!("- field '{}' of type '{}'", name.fg(Color::Green), ty.from(&types).as_struct_def().name().fg(Color::Cyan)),
+                                    ResolvedPart::Method(ty, name) => format!("- method '{}' of type '{}'", name.fg(Color::Green), ty.from(&types).as_struct_def().name().fg(Color::Cyan)),
                                     ResolvedPart::Constructor(ty) => format!("- constructor of type '{}'", name.fg(Color::Cyan)),
                                 }).collect::<Vec<String>>().join("\n"))))
                     }
@@ -208,7 +208,7 @@ pub fn print_report(
                     }
                     ResolutionError::MemberDoesNotExist(ty, name) => {
                         report
-                            .with_message(format!("type '{}' does not have a member named '{}'", ty.from(&type_pool).as_struct_def().name().fg(Color::Cyan), name.fg(Color::Green)))
+                            .with_message(format!("type '{}' does not have a member named '{}'", ty.from(&types).as_struct_def().name().fg(Color::Cyan), name.fg(Color::Green)))
                             .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                     }
                     ResolutionError::CannotCallExpression => {

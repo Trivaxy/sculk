@@ -147,7 +147,7 @@ fn compile_file(
     let (signatures, types, tags, funcs) = ir_compiler.dissolve();
 
     if errors.is_empty() && config.dump_ir {
-        dump_ir(&config, &signatures, &funcs);
+        dump_ir(&config, &types, &signatures, &funcs);
     }
 
     let mut codegen = CodeGen::new(config.pack.clone());
@@ -158,7 +158,7 @@ fn compile_file(
     (Some(Info { types, signatures }), Ok(final_output))
 }
 
-fn dump_ir(config: &Config, signatures: &HashMap<ResourceLocation, FunctionSignature>, funcs: &[IrFunction]) {
+fn dump_ir(config: &Config, types: &TypePool, signatures: &HashMap<ResourceLocation, FunctionSignature>, funcs: &[IrFunction]) {
     let mut s = String::new();
 
     for func in funcs {
@@ -174,7 +174,7 @@ fn dump_ir(config: &Config, signatures: &HashMap<ResourceLocation, FunctionSigna
                     .unwrap()
                     .params()
                     .iter()
-                    .map(|p| format!("{}: {}", p.name(), p.param_type()))
+                    .map(|p| format!("{}: {}", p.name(), p.param_type().from(types)))
                     .collect::<Vec<String>>()
                     .join(", "),
                 signatures
@@ -183,7 +183,7 @@ fn dump_ir(config: &Config, signatures: &HashMap<ResourceLocation, FunctionSigna
                         func.objective().0.clone(),
                     ))
                     .unwrap()
-                    .return_type()
+                    .return_type().from(types)
             )
             .as_str(),
         );

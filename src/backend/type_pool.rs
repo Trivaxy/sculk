@@ -86,12 +86,6 @@ impl TypePool {
 #[derive(Debug, Clone, Copy, Hash, PartialEq)]
 pub struct TypeKey(usize);
 
-impl Display for TypeKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#{}", self.0)
-    }
-}
-
 impl TypeKey {
     pub fn from<'a>(&self, pool: &'a TypePool) -> &'a SculkType {
         &pool.types[self.0]
