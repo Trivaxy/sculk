@@ -35,18 +35,6 @@ impl TypePool {
 
     pub fn insert(&mut self, name: String, mut ty: SculkType) {
         let idx_in_pool = self.types.len();
-
-        if let SculkType::Struct(ref mut def) = ty {
-            def.set_constructor(FunctionSignature::new(
-                ".ctor".to_string(),
-                def.fields()
-                    .map(|f| ParamDef::new(f.name().to_string(), f.field_type()))
-                    .collect(),
-                TypeKey(idx_in_pool),
-                true,
-            ));
-        }
-
         self.types.push(ty);
         self.type_map.insert(name, idx_in_pool);
     }
@@ -103,6 +91,19 @@ impl TypePool {
         for (i, offsets) in offsets_by_index {
             if let SculkType::Struct(def) = &mut self.types[i] {
                 def.field_offsets = offsets;
+            }
+        }
+
+        for ty in &mut self.types {
+            if let SculkType::Struct(ref mut def) = ty {
+                def.set_constructor(FunctionSignature::new(
+                    ".ctor".to_string(),
+                    def.fields()
+                        .map(|f| ParamDef::new(f.name().to_string(), f.field_type()))
+                        .collect(),
+                    TypeKey(self.type_map[def.name()]),
+                    true,
+                ));
             }
         }
     }

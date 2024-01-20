@@ -404,7 +404,7 @@ impl<'a> Validator<'a> {
                         );
                     }
                 }
-                
+
                 self.tags.tag_resolution(node, callee);
 
                 ret_type
@@ -707,7 +707,7 @@ impl<'a> Validator<'a> {
             }
         }
 
-        // Finalize the type pool
+        // Finalize the type pool (calculates field offsets and assigns constructors)
         self.types.finalize();
     }
 
