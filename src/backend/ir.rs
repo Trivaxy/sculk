@@ -13,7 +13,7 @@ use super::{
     validate::{ScopeStack, TagPool},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ValueLocation {
     pub slot: usize,
     pub offset: usize,
@@ -58,6 +58,7 @@ impl From<&ValueLocation> for ScoreboardSlot {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum BinaryOperation {
     Add,
     Subtract,
@@ -96,6 +97,7 @@ impl Display for BinaryOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Instruction {
     // Sets target to the value of source
     SetValueToValue {
@@ -280,16 +282,19 @@ impl<'a> IrCompiler<'a> {
 }
 
 /// A function that has been compiled into Sculk IR.
+#[derive(Debug)]
 pub struct IrFunction {
     objective: Objective,
     body: Vec<Instruction>,
+    signature: FunctionSignature,
 }
 
 impl IrFunction {
-    fn new(objective: Objective, body: Vec<Instruction>) -> Self {
+    fn new(objective: Objective, body: Vec<Instruction>, signature: FunctionSignature) -> Self {
         Self {
             objective,
-            body
+            body,
+            signature
         }
     }
 
@@ -299,6 +304,10 @@ impl IrFunction {
 
     pub fn body(&self) -> &[Instruction] {
         &self.body
+    }
+
+    pub fn signature(&self) -> &FunctionSignature {
+        &self.signature
     }
 }
 
@@ -314,6 +323,7 @@ struct IrFunctionBuilder<'a> {
     global_functions: &'a HashMap<ResourceLocation, FunctionSignature>,
     types: &'a TypePool,
     tags: &'a TagPool<'a>,
+    signature: &'a FunctionSignature,
 }
 
 impl<'a> IrFunctionBuilder<'a> {
@@ -328,7 +338,8 @@ impl<'a> IrFunctionBuilder<'a> {
             pack_name,
             global_functions,
             types,
-            tags
+            tags,
+            signature
         };
 
         // Give the first local indices to the function parameters
@@ -341,7 +352,7 @@ impl<'a> IrFunctionBuilder<'a> {
     }
 
     fn finish(self) -> IrFunction {
-        IrFunction::new(self.objective, self.body)
+        IrFunction::new(self.objective, self.body, self.signature.clone())
     }
 
     fn emit(&mut self, instr: Instruction) {

@@ -1,0 +1,7 @@
+fn add(a: int, b: int, c: int) -> int {
+    return add2(a, b) + c;
+}
+
+fn add2(a: int, b: int) -> int {
+	return a + b;
+}
