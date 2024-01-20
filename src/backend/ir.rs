@@ -41,7 +41,7 @@ impl ValueLocation {
 impl Display for ValueLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let offset = if self.offset == 0 { String::new() } else { format!(".{}", self.offset) };
-        write!(f, "{}{}", self.slot, if self.offset == 0 { "" } else { &offset })
+        write!(f, "{}{} {}", self.slot, if self.offset == 0 { "" } else { &offset }, self.objective)
     }
 }
 
@@ -353,15 +353,13 @@ impl<'a> IrFunctionBuilder<'a> {
 
     fn emit_value_copy(
         &mut self,
-        target_slot: usize,
-        source_slot: usize,
-        target_offset: usize,
-        source_offset: usize,
+        target: ValueLocation,
+        source: ValueLocation,
         size: usize,
     ) {
         for i in 0..size {
-            let source = ValueLocation::new(source_slot, source_offset + i, self.objective.clone());
-            let target = ValueLocation::new(target_slot, target_offset + i, self.objective.clone());
+            let source = ValueLocation::new(source.slot, source.offset + i, source.objective.clone());
+            let target = ValueLocation::new(target.slot, target.offset + i, target.objective.clone());
 
             self.emit(Instruction::SetValueToValue { source, target });
         }
@@ -515,10 +513,8 @@ impl<'a> IrFunctionBuilder<'a> {
         let target = self.get_local(name);
 
         self.emit_value_copy(
-            target.slot,
-            source.slot,
-            target.offset,
-            source.offset,
+            target,
+            source,
             self.tags.get_type(expr).from(&self.types).total_size(&self.types)
         );
     }
@@ -529,10 +525,8 @@ impl<'a> IrFunctionBuilder<'a> {
         let target = self.resolve_location(resolution);
 
         self.emit_value_copy(
-            target.slot,
-            source.slot,
-            target.offset,
-            source.offset,
+            target,
+            source,
             self.tags.get_type(expr).from(&self.types).total_size(&self.types)
         );
     }
@@ -651,10 +645,8 @@ impl<'a> IrFunctionBuilder<'a> {
 
                 for (param, arg) in struct_def.constructor().params().iter().zip(args) {
                     self.emit_value_copy(
-                        target.slot,
-                        arg.slot,
-                        target.offset + struct_def.field_offset(param.name()),
-                        arg.offset,
+                        ValueLocation::new(target.slot, target.offset + struct_def.field_offset(param.name()), target.objective.clone()),
+                        arg,
                         param.param_type().from(&self.types).total_size(&self.types)
                     );
                 }
@@ -668,10 +660,8 @@ impl<'a> IrFunctionBuilder<'a> {
             let target = ValueLocation::new(i, 0, func_objective.clone());
 
             self.emit_value_copy(
-                target.slot,
-                arg.slot,
-                target.offset,
-                arg.offset,
+                target,
+                arg,
                 param.param_type().from(&self.types).total_size(&self.types)
             );
         }
@@ -685,10 +675,8 @@ impl<'a> IrFunctionBuilder<'a> {
             let source = ValueLocation::new(0, 0, Objective(format!("{}.return", func_objective.0)));
 
             self.emit_value_copy(
-                target.slot,
-                source.slot,
-                target.offset,
-                source.offset,
+                target.clone(),
+                source,
                 self.tags.get_type(node).from(&self.types).total_size(&self.types)
             );
 
@@ -712,10 +700,8 @@ impl<'a> IrFunctionBuilder<'a> {
                 let size = self.tags.get_type(expr).from(&self.types).total_size(&self.types);
 
                 self.emit_value_copy(
-                    target.slot,
-                    source.slot,
-                    target.offset,
-                    source.offset,
+                    target.clone(),
+                    source,
                     size
                 );
 
@@ -805,10 +791,8 @@ impl<'a> IrFunctionBuilder<'a> {
         let expr_type = self.tags.get_type(expr).from(&self.types).as_struct_def();
 
         self.emit_value_copy(
-            target.slot,
-            source.slot,
-            target.offset,
-            source.offset + expr_type.field_offset(member),
+            target.clone(),
+            ValueLocation::new(source.slot, source.offset + expr_type.field_offset(member), source.objective.clone()),
             self.types.get_type_key(member).unwrap().from(&self.types).total_size(&self.types)
         );
 
