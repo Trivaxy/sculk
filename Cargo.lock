@@ -169,9 +169,9 @@ checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
 name = "dpc"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a2653576545f6f95abbc6e8d439e1554e0e643b81ff91743cb119e922f10a5"
+checksum = "58c6a6896fda0339c9816a220d56d0669059d46c0f0cb8e80f0e737df149ea3a"
 dependencies = [
  "anyhow",
  "clap",
