@@ -15,13 +15,13 @@ use super::{
 
 #[derive(Clone, Debug)]
 pub struct ValueLocation {
-    slot: usize,
-    offset: usize,
-    objective: Objective,
+    pub slot: usize,
+    pub offset: usize,
+    pub objective: Objective,
 }
 
 impl ValueLocation {
-    fn new(slot: usize, offset: usize, objective: Objective) -> Self {
+    pub fn new(slot: usize, offset: usize, objective: Objective) -> Self {
         Self {
             slot,
             offset,
@@ -696,17 +696,17 @@ impl<'a> IrFunctionBuilder<'a> {
         match expr {
             Some(expr) => {
                 let source = self.visit_node(expr);
-                let target = ValueLocation::new(0, 0, Objective(format!("{}.return", self.objective.clone())));
+                //let target = ValueLocation::new(0, 0, Objective(format!("{}.return", self.objective.clone())));
                 let size = self.tags.get_type(expr).from(&self.types).total_size(&self.types);
 
-                self.emit_value_copy(
-                    target.clone(),
-                    source,
-                    size
-                );
+                //self.emit_value_copy(
+                //    target.clone(),
+                //    source,
+                //    size
+                //);
 
                 self.emit(Instruction::Return {
-                    source: Some(target),
+                    source: Some(source),
                     size
                 });
             }

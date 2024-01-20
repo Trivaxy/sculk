@@ -2,7 +2,7 @@ use std::{sync::atomic::{AtomicI32, Ordering}, fmt::{Display, Formatter}, collec
 
 use crate::{data::{ResourceLocation, ScoreboardSlot, ScoreboardOperationType, Objective}, parser::Operation};
 
-use super::ir::{IrFunction, Instruction, BinaryOperation};
+use super::ir::{IrFunction, Instruction, BinaryOperation, ValueLocation};
 
 static ANON_FUNC_COUNT: AtomicI32 = AtomicI32::new(0);
 
@@ -206,13 +206,26 @@ impl CodeGen {
                         breaks: false
                     }).returns = true;
 
-                    CommandAction::Several(vec![
-                        CommandAction::SetScoreboardEntry {
-                            entry: ScoreboardSlot::new(Objective(format!("{}.return", objective)), "flag".to_string()),
-                            value: 1,
-                        },
-                        CommandAction::Return,
-                    ])
+                    let mut actions = vec![];
+
+                    if let Some(source) = source {
+                        for i in 0..*size {
+                            actions.push(CommandAction::ScoreboardOperation {
+                                op: ScoreboardOperationType::Set,
+                                a: ScoreboardSlot::from(ValueLocation::new(0, i, Objective(format!("{}.return", objective)))),
+                                b: ScoreboardSlot::from(ValueLocation::new(source.slot, source.offset + i, source.objective.clone())),
+                            });
+                        }
+                    }
+
+                    actions.push(CommandAction::SetScoreboardEntry {
+                        entry: ScoreboardSlot::new(Objective(format!("{}.return", objective)), "flag".to_string()),
+                        value: 1,
+                    });
+
+                    actions.push(CommandAction::Return);
+
+                    CommandAction::Several(actions)
                 }
                 Instruction::Break => {
                     self.block_info.entry(block_id).or_insert(BlockInfo {
