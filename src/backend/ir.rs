@@ -621,75 +621,55 @@ impl<'a> IrFunctionBuilder<'a> {
         let args: Vec<ValueLocation> = args.iter().map(|arg| self.visit_node(arg)).collect();
         let resolution = self.tags.get_resolution(node);
         let mut func_objective = Objective(String::new());
+        let mut func_signature;
         let mut handle_return = false;
 
         match resolution.last() {
             ResolvedPart::GlobalFunction(name) => {
                 let func_location = ResourceLocation::new(self.pack_name.clone(), name.clone());
-                let func_signature = self.global_functions.get(&func_location).unwrap();
 
                 func_objective = Objective(name.clone());
-
-                for (i, (param, arg)) in func_signature.params().iter().zip(args).enumerate() {
-                    let target = ValueLocation::new(i, 0, func_objective.clone());
-
-                    self.emit_value_copy(
-                        target.slot,
-                        arg.slot,
-                        target.offset,
-                        arg.offset,
-                        param.param_type().from(&self.types).total_size(&self.types)
-                    );
-                }
-
+                func_signature = self.global_functions.get(&func_location).unwrap();
                 handle_return = func_signature.return_type() != self.types.none();
             }
             ResolvedPart::Method(ty, name) => {
                 let struct_def = ty.from(&self.types).as_struct_def();
-                let method_signature = struct_def.function(name).unwrap();
 
                 func_objective = Objective(format!("{}.{}", struct_def.name(), name));
-
-                for (i, (param, arg)) in method_signature.params().iter().zip(args).enumerate() {
-                    let target = ValueLocation::new(i, 0, func_objective.clone());
-
-                    self.emit_value_copy(
-                        target.slot,
-                        arg.slot,
-                        target.offset,
-                        arg.offset,
-                        param.param_type().from(&self.types).total_size(&self.types)
-                    );
-                }
-
-                handle_return = method_signature.return_type() != self.types.none();
+                func_signature = struct_def.function(name).unwrap();
+                handle_return = func_signature.return_type() != self.types.none();
             }
+            // Constructors are a special case. To the user they seem like regular functions,
+            // but on the IR level, they construct a new value in-place
             ResolvedPart::Constructor(ty) => {
                 let struct_def = ty.from(&self.types).as_struct_def();
+                let target = self.get_free_location();
 
-                func_objective = Objective(struct_def.name().to_string());
-
-                for (i, (param, arg)) in struct_def
-                    .constructor()
-                    .params()
-                    .iter()
-                    .zip(args)
-                    .enumerate()
-                {
-                    let target = ValueLocation::new(i, 0, func_objective.clone());
-
+                for (param, arg) in struct_def.constructor().params().iter().zip(args) {
                     self.emit_value_copy(
                         target.slot,
                         arg.slot,
-                        target.offset,
+                        target.offset + struct_def.field_offset(param.name()),
                         arg.offset,
                         param.param_type().from(&self.types).total_size(&self.types)
                     );
                 }
 
-                handle_return = true;
+                return Some(target);
             }
             _ => unreachable!(),
+        }
+
+        for (i, (param, arg)) in func_signature.params().iter().zip(args).enumerate() {
+            let target = ValueLocation::new(i, 0, func_objective.clone());
+
+            self.emit_value_copy(
+                target.slot,
+                arg.slot,
+                target.offset,
+                arg.offset,
+                param.param_type().from(&self.types).total_size(&self.types)
+            );
         }
 
         self.emit(Instruction::Call {
