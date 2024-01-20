@@ -21,7 +21,7 @@ impl Display for ResourceLocation {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Objective(pub String);
 
 impl Objective {

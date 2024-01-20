@@ -13,7 +13,7 @@ use super::{
     validate::{ScopeStack, TagPool},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ValueLocation {
     slot: usize,
     offset: usize,
@@ -309,7 +309,6 @@ struct IrFunctionBuilder<'a> {
     next_slot: usize,
     blocks: Vec<Vec<Instruction>>,
     next_block_id: usize,
-    signature: &'a FunctionSignature,
     objective: Objective,
     pack_name: String,
     global_functions: &'a HashMap<ResourceLocation, FunctionSignature>,
@@ -325,7 +324,6 @@ impl<'a> IrFunctionBuilder<'a> {
             next_slot: 0,
             blocks: Vec::new(),
             next_block_id: 0,
-            signature,
             objective,
             pack_name,
             global_functions,
@@ -336,6 +334,7 @@ impl<'a> IrFunctionBuilder<'a> {
         // Give the first local indices to the function parameters
         for (idx, param) in signature.params().iter().enumerate() {
             s.locals.insert(param.name().to_owned(), idx);
+            s.next_slot += 1;
         }
 
         s
@@ -614,15 +613,20 @@ impl<'a> IrFunctionBuilder<'a> {
     }
 
     fn visit_function_call(&mut self, node: &ParserNode) -> Option<ValueLocation> {
-        let (expr, args) = node.as_function_call();
-
-        self.visit_node(expr);
-
-        let args: Vec<ValueLocation> = args.iter().map(|arg| self.visit_node(arg)).collect();
+        let (expr, params) = node.as_function_call();
         let resolution = self.tags.get_resolution(node);
-        let mut func_objective = Objective(String::new());
-        let mut func_signature;
-        let mut handle_return = false;
+
+        let mut args = vec![];
+
+        if let ResolvedPart::Method(_, _) = resolution.last() {
+            args.push(self.visit_node(expr)); // self parameter
+        }
+
+        args.extend(params.iter().map(|arg| self.visit_node(arg)));
+        
+        let func_objective;
+        let func_signature;
+        let handle_return;
 
         match resolution.last() {
             ResolvedPart::GlobalFunction(name) => {
