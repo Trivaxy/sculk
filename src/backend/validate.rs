@@ -404,7 +404,7 @@ impl<'a> Validator<'a> {
                         );
                     }
                 }
-
+                
                 self.tags.tag_resolution(node, callee);
 
                 ret_type
