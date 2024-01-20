@@ -351,7 +351,7 @@ impl Display for CommandAction {
     }
 }
 
-enum Condition {
+pub enum Condition {
     ScoreCompare {
         a: ScoreboardSlot,
         b: ScoreboardSlot,
@@ -376,7 +376,7 @@ impl Display for Condition {
     }
 }
 
-enum ConditionOperator {
+pub enum ConditionOperator {
     LessThan,
     LessThanOrEquals,
     Equals,

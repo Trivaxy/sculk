@@ -706,6 +706,9 @@ impl<'a> Validator<'a> {
                 );
             }
         }
+
+        // Finalize the type pool
+        self.types.finalize();
     }
 
     // should only be passed the contents of the root Program node

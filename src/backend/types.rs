@@ -93,7 +93,7 @@ pub struct StructDef {
     functions: IndexMap<String, FunctionSignature>,
     // Typically never None, but Option is needed since the constructor is added only after the struct is registered in a type pool
     constructor: Option<FunctionSignature>,
-    field_offsets: Vec<usize>,
+    pub(super) field_offsets: Vec<usize>,
 }
 
 impl StructDef {
@@ -127,15 +127,6 @@ impl StructDef {
         Ok(())
     }
 
-    pub fn finalize(&mut self, types: &TypePool) {
-        let mut offset = 0;
-
-        for field in self.fields.values() {
-            self.field_offsets.push(offset);
-            offset += field.ty.from(types).total_size(types);
-        }
-    }
-
     pub fn self_referencing(&self, types: &TypePool) -> bool {
         let mut field_types = self
             .fields
@@ -166,12 +157,20 @@ impl StructDef {
         self.fields.get(name)
     }
 
+    pub fn field_by_idx(&self, idx: usize) -> &FieldDef {
+        self.fields.index(idx)
+    }
+
     pub fn field_idx(&self, name: &str) -> Option<usize> {
         self.fields.get_index_of(name)
     }
 
     pub fn fields(&self) -> impl Iterator<Item = &FieldDef> {
         self.fields.values()
+    }
+
+    pub fn field_count(&self) -> usize {
+        self.fields.len()
     }
 
     pub fn function(&self, name: &str) -> Option<&FunctionSignature> {

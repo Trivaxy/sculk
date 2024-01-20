@@ -45,8 +45,6 @@ impl TypePool {
                 TypeKey(idx_in_pool),
                 true,
             ));
-
-            def.finalize(self);
         }
 
         self.types.push(ty);
@@ -79,6 +77,34 @@ impl TypePool {
 
     pub fn iter(&self) -> impl Iterator<Item = &SculkType> {
         self.types.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut SculkType> {
+        self.types.iter_mut()
+    }
+
+    pub fn finalize(&mut self) {
+        let mut offsets_by_index = Vec::new();
+
+        for i in 0..self.types.len() {
+            if let SculkType::Struct(def) = &self.types[i] {
+                let mut offset = 0;
+                let mut offsets = Vec::new();
+
+                for field in def.fields() {
+                    offsets.push(offset);
+                    offset += field.field_type().from(self).total_size(self);
+                }
+
+                offsets_by_index.push((i, offsets));
+            }
+        }
+
+        for (i, offsets) in offsets_by_index {
+            if let SculkType::Struct(def) = &mut self.types[i] {
+                def.field_offsets = offsets;
+            }
+        }
     }
 }
 
