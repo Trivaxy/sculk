@@ -148,28 +148,9 @@ fn dump_ir(config: &Config, types: &TypePool, signatures: &HashMap<ResourceLocat
     for func in funcs {
         s.push_str(
             format!(
-                "fn {}({}) -> {}",
+                "fn {}",
                 func.objective(),
-                signatures
-                    .get(&ResourceLocation::new(
-                        config.pack.clone(),
-                        func.objective().0.clone(),
-                    ))
-                    .unwrap()
-                    .params()
-                    .iter()
-                    .map(|p| format!("{}: {}", p.name(), p.param_type().from(types)))
-                    .collect::<Vec<String>>()
-                    .join(", "),
-                signatures
-                    .get(&ResourceLocation::new(
-                        config.pack.clone(),
-                        func.objective().0.clone(),
-                    ))
-                    .unwrap()
-                    .return_type().from(types)
-            )
-            .as_str(),
+            ).as_str()
         );
 
         s.push_str("\n");
