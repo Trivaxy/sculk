@@ -1,7 +1,14 @@
 fn add(a: int, b: int, c: int) -> int {
-    return add2(a, b) + c;
+	return add2(a, b) + c;
 }
 
 fn add2(a: int, b: int) -> int {
 	return a + b;
+}
+
+fn main() {
+	let x = 7;
+	let y = 9;
+	let z = -2;
+	z = add(x, y, z);
 }

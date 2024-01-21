@@ -426,8 +426,14 @@ impl CompiledFunction {
 
 impl Display for CompiledFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        // TODO: optimize
-        write!(f, "{}", self.actions.iter().map(|a| format!("{}", a)).collect::<Vec<String>>().join("\n"))
+        for (i, action) in self.actions.iter().enumerate() {
+            write!(f, "{action}")?;
+            if i != self.actions.len() - 1 {
+                write!(f, "\n")?;
+            }
+        }
+
+        Ok(())
     }
 }
 

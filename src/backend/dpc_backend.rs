@@ -38,7 +38,7 @@ fn dpc_codegen(
     config: &Config,
     types: &TypePool,
 ) -> Result<Datapack, String> {
-    dbg!(&functions);
+    // dbg!(&functions);
     let mut ir = IR::new();
     let mut blocks = HashMap::new();
     for function in functions {
@@ -87,7 +87,7 @@ fn dpc_codegen(
             .insert(function_id.into(), IRFunction { interface, block });
     }
 
-    dbg!(&ir);
+    // dbg!(&ir);
 
     let proj = ProjectSettingsBuilder::new(&config.pack);
     let proj = proj.op_level(OptimizationLevel::Full);
@@ -111,7 +111,7 @@ fn codegen_block(
 ) -> Block {
     let mut block = Block::new();
     let mut calls = HashMap::new();
-    for instr in body {
+    for (i, instr) in body.into_iter().enumerate() {
         let instr = match instr {
             Instruction::CreateBlock { id, is_loop, body } => {
                 if *is_loop {
@@ -156,7 +156,7 @@ fn codegen_block(
                         .entry(ret.to_string())
                         .or_insert_with(|| CallBuilder::from_obj(ret))
                         .rets
-                        .push(val);
+                        .push(target.get_val(func_sig));
                     None
                 } else {
                     defs.ensure_defined(source);
@@ -227,17 +227,24 @@ fn codegen_block(
             Instruction::Return { source, size } => {
                 if let Some(source) = source {
                     for i in 0..*size {
+                        let val = source.offset(i);
                         block
                             .contents
                             .push(DPCInstruction::new(InstrKind::ReturnValue {
-                                index: (i as u16),
-                                value: Value::Mutable(source.get_val(func_sig)),
+                                index: i,
+                                value: Value::Mutable(val.get_val(func_sig)),
                             }));
                     }
                 }
-                Some(InstrKind::Return {
-                    value: Value::Constant(DataTypeContents::Score(ScoreTypeContents::Score(0))),
-                })
+                if i == body.len() - 1 {
+                    None
+                } else {
+                    Some(InstrKind::Return {
+                        value: Value::Constant(DataTypeContents::Score(ScoreTypeContents::Score(
+                            0,
+                        ))),
+                    })
+                }
             }
             _ => None,
         };
@@ -303,7 +310,7 @@ impl ValueLocation {
         // Sculk uses the slots that are within the length of the
         // parameters as arguments
         if self.slot < func_sig.params().len() {
-            MutableValue::Arg(self.slot as u16)
+            MutableValue::Arg(self.slot)
         } else {
             MutableValue::Reg(self.get_reg())
         }
@@ -392,6 +399,7 @@ impl BinaryOperation {
 /// which sculk IR splits up into multiple instructions,
 /// so that it can be combined for DPC
 struct CallBuilder {
+    #[allow(dead_code)]
     func_id: String,
     pos: usize,
     resource_location: Option<DPCResourceLocation>,

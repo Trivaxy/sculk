@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    data::{Objective, ResourceLocation, ScoreboardSlot, ScoreboardOperationType},
+    data::{Objective, ResourceLocation, ScoreboardOperationType, ScoreboardSlot},
     parser::{Operation, ParserNode, ParserNodeKind},
 };
 
@@ -29,6 +29,14 @@ impl ValueLocation {
         }
     }
 
+    pub fn offset(&self, amt: usize) -> Self {
+        Self {
+            slot: self.slot,
+            offset: self.offset + amt,
+            objective: self.objective.clone(),
+        }
+    }
+
     fn dummy() -> Self {
         Self {
             slot: 0,
@@ -40,14 +48,28 @@ impl ValueLocation {
 
 impl Display for ValueLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let offset = if self.offset == 0 { String::new() } else { format!(".{}", self.offset) };
-        write!(f, "{}{} {}", self.slot, if self.offset == 0 { "" } else { &offset }, self.objective)
+        let offset = if self.offset == 0 {
+            String::new()
+        } else {
+            format!(".{}", self.offset)
+        };
+        write!(
+            f,
+            "{}{} {}",
+            self.slot,
+            if self.offset == 0 { "" } else { &offset },
+            self.objective
+        )
     }
 }
 
 impl From<ValueLocation> for ScoreboardSlot {
     fn from(loc: ValueLocation) -> Self {
-        let offset = if loc.offset == 0 { String::new() } else { format!(".{}", loc.offset) };
+        let offset = if loc.offset == 0 {
+            String::new()
+        } else {
+            format!(".{}", loc.offset)
+        };
         ScoreboardSlot::new(loc.objective.clone(), format!("v{}{}", loc.slot, offset))
     }
 }
@@ -170,10 +192,14 @@ impl Display for Instruction {
             }
             ToggleValue { target } => write!(f, "op T({}) = !T({})", target, target),
             ModifyValue { target, value } => write!(f, "op T({}) += {}", target, value),
-            Return { source, size } => write!(f, "return{}", match source {
-                Some(source) => format!(" S({}) SIZE={}", source, size),
-                None => String::new(),
-            }),
+            Return { source, size } => write!(
+                f,
+                "return{}",
+                match source {
+                    Some(source) => format!(" S({}) SIZE={}", source, size),
+                    None => String::new(),
+                }
+            ),
             Break => write!(f, "break"),
             Call { function } => write!(f, "call {}", function),
             CreateBlock { id, is_loop, body } => {
@@ -186,7 +212,11 @@ impl Display for Instruction {
                 Ok(())
             }
             EnterBlock { id } => write!(f, "enter B({})", id),
-            IfValueMatchesRunBlock { source, value, block } => {
+            IfValueMatchesRunBlock {
+                source,
+                value,
+                block,
+            } => {
                 write!(f, "if S({}) == {} then block {}", source, value, block)
             }
             PlaceCommandLiteral(cmd) => write!(f, "/{}", cmd),
@@ -247,12 +277,14 @@ impl<'a> IrCompiler<'a> {
             match node.kind() {
                 ParserNodeKind::FunctionDeclaration { name, body, .. } => {
                     let mut builder = IrFunctionBuilder::new(
-                        self.global_functions.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap(),
+                        self.global_functions
+                            .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
+                            .unwrap(),
                         Objective(name.clone()),
                         self.pack_name.clone(),
                         &self.global_functions,
                         &self.types,
-                        &self.tags
+                        &self.tags,
                     );
 
                     builder.visit_node(body);
@@ -262,12 +294,18 @@ impl<'a> IrCompiler<'a> {
                 ParserNodeKind::StructDefinition { name, members } => {
                     for method in members.iter().filter(|m| m.is_func_declaration()) {
                         let mut builder = IrFunctionBuilder::new(
-                            self.types.get_type_key(name).unwrap().from(&self.types).as_struct_def().function(method.as_func_name()).unwrap(),
+                            self.types
+                                .get_type_key(name)
+                                .unwrap()
+                                .from(&self.types)
+                                .as_struct_def()
+                                .function(method.as_func_name())
+                                .unwrap(),
                             Objective(format!("{}.{}", name, method.as_func_name())),
                             self.pack_name.clone(),
                             &self.global_functions,
                             &self.types,
-                            &self.tags
+                            &self.tags,
                         );
 
                         builder.visit_node(method.as_func_body());
@@ -294,7 +332,7 @@ impl IrFunction {
         Self {
             objective,
             body,
-            signature
+            signature,
         }
     }
 
@@ -327,7 +365,14 @@ struct IrFunctionBuilder<'a> {
 }
 
 impl<'a> IrFunctionBuilder<'a> {
-    fn new(signature: &'a FunctionSignature, objective: Objective, pack_name: String, global_functions: &'a HashMap<ResourceLocation, FunctionSignature>, types: &'a TypePool, tags: &'a TagPool) -> Self {
+    fn new(
+        signature: &'a FunctionSignature,
+        objective: Objective,
+        pack_name: String,
+        global_functions: &'a HashMap<ResourceLocation, FunctionSignature>,
+        types: &'a TypePool,
+        tags: &'a TagPool,
+    ) -> Self {
         let mut s = Self {
             body: Vec::new(),
             locals: HashMap::new(),
@@ -339,7 +384,7 @@ impl<'a> IrFunctionBuilder<'a> {
             global_functions,
             types,
             tags,
-            signature
+            signature,
         };
 
         // Give the first local indices to the function parameters
@@ -362,15 +407,12 @@ impl<'a> IrFunctionBuilder<'a> {
         }
     }
 
-    fn emit_value_copy(
-        &mut self,
-        target: ValueLocation,
-        source: ValueLocation,
-        size: usize,
-    ) {
+    fn emit_value_copy(&mut self, target: ValueLocation, source: ValueLocation, size: usize) {
         for i in 0..size {
-            let source = ValueLocation::new(source.slot, source.offset + i, source.objective.clone());
-            let target = ValueLocation::new(target.slot, target.offset + i, target.objective.clone());
+            let source =
+                ValueLocation::new(source.slot, source.offset + i, source.objective.clone());
+            let target =
+                ValueLocation::new(target.slot, target.offset + i, target.objective.clone());
 
             self.emit(Instruction::SetValueToValue { source, target });
         }
@@ -393,7 +435,11 @@ impl<'a> IrFunctionBuilder<'a> {
         ValueLocation::new(slot, 0, self.objective.clone())
     }
 
-    fn create_block(is_loop: bool, builder: &mut Self, emitted: impl FnOnce(usize, &mut Self)) -> usize {
+    fn create_block(
+        is_loop: bool,
+        builder: &mut Self,
+        emitted: impl FnOnce(usize, &mut Self),
+    ) -> usize {
         let id = builder.next_block_id;
         builder.next_block_id += 1;
 
@@ -403,11 +449,7 @@ impl<'a> IrFunctionBuilder<'a> {
 
         let body = builder.blocks.pop().unwrap();
 
-        builder.emit(Instruction::CreateBlock {
-            id,
-            is_loop,
-            body
-        });
+        builder.emit(Instruction::CreateBlock { id, is_loop, body });
 
         id
     }
@@ -442,7 +484,7 @@ impl<'a> IrFunctionBuilder<'a> {
             ParserNodeKind::FunctionCall { .. } => match self.visit_function_call(node) {
                 Some(target) => target,
                 None => ValueLocation::dummy(),
-            }
+            },
             ParserNodeKind::Block(body) => {
                 self.visit_block(body);
                 ValueLocation::dummy()
@@ -514,7 +556,10 @@ impl<'a> IrFunctionBuilder<'a> {
         let source = self.get_local(name);
         let target = self.get_free_location();
 
-        self.emit(Instruction::SetValueToValue { source, target: target.clone() });
+        self.emit(Instruction::SetValueToValue {
+            source,
+            target: target.clone(),
+        });
 
         target
     }
@@ -526,7 +571,10 @@ impl<'a> IrFunctionBuilder<'a> {
         self.emit_value_copy(
             target,
             source,
-            self.tags.get_type(expr).from(&self.types).total_size(&self.types)
+            self.tags
+                .get_type(expr)
+                .from(&self.types)
+                .total_size(&self.types),
         );
     }
 
@@ -538,7 +586,10 @@ impl<'a> IrFunctionBuilder<'a> {
         self.emit_value_copy(
             target,
             source,
-            self.tags.get_type(expr).from(&self.types).total_size(&self.types)
+            self.tags
+                .get_type(expr)
+                .from(&self.types)
+                .total_size(&self.types),
         );
     }
 
@@ -568,7 +619,11 @@ impl<'a> IrFunctionBuilder<'a> {
         let target = self.visit_node(lhs);
         let source = self.visit_node(rhs);
 
-        self.emit(Instruction::ValueBinaryOperation { source, target: target.clone(), op });
+        self.emit(Instruction::ValueBinaryOperation {
+            source,
+            target: target.clone(),
+            op,
+        });
 
         target
     }
@@ -592,7 +647,9 @@ impl<'a> IrFunctionBuilder<'a> {
                 });
             }
             Operation::Not => {
-                self.emit(Instruction::ToggleValue { target: target.clone() });
+                self.emit(Instruction::ToggleValue {
+                    target: target.clone(),
+                });
             }
             _ => unreachable!(),
         }
@@ -628,7 +685,7 @@ impl<'a> IrFunctionBuilder<'a> {
         }
 
         args.extend(params.iter().map(|arg| self.visit_node(arg)));
-        
+
         let func_objective;
         let func_signature;
         let handle_return;
@@ -656,9 +713,13 @@ impl<'a> IrFunctionBuilder<'a> {
 
                 for (param, arg) in struct_def.constructor().params().iter().zip(args) {
                     self.emit_value_copy(
-                        ValueLocation::new(target.slot, target.offset + struct_def.field_offset(param.name()), target.objective.clone()),
+                        ValueLocation::new(
+                            target.slot,
+                            target.offset + struct_def.field_offset(param.name()),
+                            target.objective.clone(),
+                        ),
                         arg,
-                        param.param_type().from(&self.types).total_size(&self.types)
+                        param.param_type().from(&self.types).total_size(&self.types),
                     );
                 }
 
@@ -673,7 +734,7 @@ impl<'a> IrFunctionBuilder<'a> {
             self.emit_value_copy(
                 target,
                 arg,
-                param.param_type().from(&self.types).total_size(&self.types)
+                param.param_type().from(&self.types).total_size(&self.types),
             );
         }
 
@@ -683,12 +744,16 @@ impl<'a> IrFunctionBuilder<'a> {
 
         if handle_return {
             let target = self.get_free_location();
-            let source = ValueLocation::new(0, 0, Objective(format!("{}.return", func_objective.0)));
+            let source =
+                ValueLocation::new(0, 0, Objective(format!("{}.return", func_objective.0)));
 
             self.emit_value_copy(
                 target.clone(),
                 source,
-                self.tags.get_type(node).from(&self.types).total_size(&self.types)
+                self.tags
+                    .get_type(node)
+                    .from(&self.types)
+                    .total_size(&self.types),
             );
 
             Some(target)
@@ -708,7 +773,11 @@ impl<'a> IrFunctionBuilder<'a> {
             Some(expr) => {
                 let source = self.visit_node(expr);
                 //let target = ValueLocation::new(0, 0, Objective(format!("{}.return", self.objective.clone())));
-                let size = self.tags.get_type(expr).from(&self.types).total_size(&self.types);
+                let size = self
+                    .tags
+                    .get_type(expr)
+                    .from(&self.types)
+                    .total_size(&self.types);
 
                 //self.emit_value_copy(
                 //    target.clone(),
@@ -718,13 +787,13 @@ impl<'a> IrFunctionBuilder<'a> {
 
                 self.emit(Instruction::Return {
                     source: Some(source),
-                    size
+                    size,
                 });
             }
             None => {
                 self.emit(Instruction::Return {
                     source: None,
-                    size: 0
+                    size: 0,
                 });
             }
         }
@@ -739,9 +808,9 @@ impl<'a> IrFunctionBuilder<'a> {
         let true_body = Self::create_block(false, self, |_, builder| {
             builder.visit_node(body);
         });
-        
+
         let else_body = else_body.as_ref().map(|else_body| {
-            Self::create_block(false, self,|_, builder| {
+            Self::create_block(false, self, |_, builder| {
                 builder.visit_node(else_body);
             })
         });
@@ -803,8 +872,16 @@ impl<'a> IrFunctionBuilder<'a> {
 
         self.emit_value_copy(
             target.clone(),
-            ValueLocation::new(source.slot, source.offset + expr_type.field_offset(member), source.objective.clone()),
-            self.types.get_type_key(member).unwrap().from(&self.types).total_size(&self.types)
+            ValueLocation::new(
+                source.slot,
+                source.offset + expr_type.field_offset(member),
+                source.objective.clone(),
+            ),
+            self.types
+                .get_type_key(member)
+                .unwrap()
+                .from(&self.types)
+                .total_size(&self.types),
         );
 
         target
@@ -827,10 +904,6 @@ impl<'a> IrFunctionBuilder<'a> {
             }
         }
 
-        ValueLocation::new(
-            slot,
-            offset,
-            self.objective.clone(),
-        )
+        ValueLocation::new(slot, offset, self.objective.clone())
     }
 }
