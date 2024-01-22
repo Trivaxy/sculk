@@ -205,7 +205,7 @@ impl<'a> Validator<'a> {
             ParserNodeKind::NumberLiteral(_) => self.types.int(),
             ParserNodeKind::BoolLiteral(_) => self.types.bool(),
             ParserNodeKind::Identifier(ident) => {
-                let ty = match self.scope_stack.find_variable_type(ident) {
+                match self.scope_stack.find_variable_type(ident) {
                     Some(ty) => ty,
                     None => {
                         self.errors.add(
@@ -214,9 +214,7 @@ impl<'a> Validator<'a> {
                         );
                         self.types.unknown()
                     }
-                };
-
-                ty
+                }
             }
             ParserNodeKind::TypedIdentifier { .. } => self.types.none(),
             ParserNodeKind::VariableDeclaration { name, expr, ty } => {
@@ -522,9 +520,9 @@ impl<'a> Validator<'a> {
                 self.types.none()
             }
             ParserNodeKind::MemberAccess { expr, member } => {
-                match self.resolver()
-                .resolve(node)
-                {
+                self.visit_node(expr);
+                
+                match self.resolver().resolve(node) {
                     Ok(resolution) => match resolution.last() {
                         ResolvedPart::Field(ty, name) => ty
                             .from(&self.types)
