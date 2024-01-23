@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, sync::atomic::{AtomicUsize, Ordering}};
 
 use crate::{
     data::{Objective, ResourceLocation, ScoreboardSlot, ScoreboardOperationType},
@@ -209,7 +209,6 @@ pub struct IrCompiler<'a> {
     global_functions: HashMap<ResourceLocation, FunctionSignature>,
     tags: TagPool<'a>,
     compiled_funcs: Vec<IrFunction>,
-    next_block_id: usize,
 }
 
 impl<'a> IrCompiler<'a> {
@@ -225,7 +224,6 @@ impl<'a> IrCompiler<'a> {
             global_functions,
             tags,
             compiled_funcs: Vec::new(),
-            next_block_id: 0,
         }
     }
 
@@ -309,13 +307,14 @@ impl IrFunction {
     }
 }
 
+static NEXT_BLOCK_ID: AtomicUsize = AtomicUsize::new(0);
+
 /// A helper struct that assists in building Sculk IR functions.
 struct IrFunctionBuilder<'a> {
     body: Vec<Instruction>,
     locals: HashMap<String, usize>,
     next_slot: usize,
     blocks: Vec<Vec<Instruction>>,
-    next_block_id: usize,
     objective: Objective,
     pack_name: String,
     global_functions: &'a HashMap<ResourceLocation, FunctionSignature>,
@@ -330,7 +329,6 @@ impl<'a> IrFunctionBuilder<'a> {
             locals: HashMap::new(),
             next_slot: 0,
             blocks: Vec::new(),
-            next_block_id: 0,
             objective,
             pack_name,
             global_functions,
@@ -391,8 +389,7 @@ impl<'a> IrFunctionBuilder<'a> {
     }
 
     fn create_block(is_loop: bool, builder: &mut Self, emitted: impl FnOnce(usize, &mut Self)) -> usize {
-        let id = builder.next_block_id;
-        builder.next_block_id += 1;
+        let id = NEXT_BLOCK_ID.fetch_add(1, Ordering::Relaxed);
 
         builder.blocks.push(Vec::new());
 
