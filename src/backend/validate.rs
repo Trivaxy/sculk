@@ -517,6 +517,7 @@ impl<'a> Validator<'a> {
                     }
                 }
 
+                self.tags.tag_resolution(path, resolution);
                 self.types.none()
             }
             ParserNodeKind::MemberAccess { expr, member } => {
