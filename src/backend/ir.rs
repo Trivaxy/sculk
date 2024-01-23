@@ -151,43 +151,51 @@ pub enum Instruction {
     PlaceCommandLiteral(String),
 }
 
-impl Display for Instruction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Instruction {
+    fn fmt_with_indent(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         use Instruction::*;
 
         match self {
             SetValueToValue { source, target } => {
-                write!(f, "set T({}) = S({})", target, source)
+                write!(f, "{:indent$}set T({}) = S({})", "", target, source, indent = indent)
             }
             SetValueToConstant { target, constant } => {
-                write!(f, "set T({}) = {}", target, constant)
+                write!(f, "{:indent$}set T({}) = {}", "", target, constant, indent = indent)
             }
             ValueBinaryOperation { source, target, op } => {
-                write!(f, "op T({}) = T({}) {} S({})", target, target, op, source)
+                write!(f, "{:indent$}op T({}) = T({}) {} S({})", "", target, target, op, source, indent = indent)
             }
-            ToggleValue { target } => write!(f, "op T({}) = !T({})", target, target),
-            ModifyValue { target, value } => write!(f, "op T({}) += {}", target, value),
-            Return { source, size } => write!(f, "return{}", match source {
+            ToggleValue { target } => write!(f, "{:indent$}op T({}) = !T({})", "", target, target, indent = indent),
+            ModifyValue { target, value } => write!(f, "{:indent$}op T({}) += {}", "", target, value, indent = indent),
+            Return { source, size } => write!(f, "{:indent$}return{}", "", match source {
                 Some(source) => format!(" S({}) SIZE={}", source, size),
                 None => String::new(),
-            }),
-            Break => write!(f, "break"),
-            Call { function } => write!(f, "call {}", function),
+            }, indent = indent),
+            Break => write!(f, "{:indent$}break", "", indent = indent),
+            Call { function } => write!(f, "{:indent$}call {}", "", function, indent = indent),
             CreateBlock { id, is_loop, body } => {
-                write!(f, "block {} (loop: {})", id, is_loop)?;
+                writeln!(f)?;
+                writeln!(f, "{:indent$}block {} (loop: {})", "", id, is_loop, indent = indent)?;
 
                 for instr in body {
-                    write!(f, "\n    {}", instr)?;
+                    instr.fmt_with_indent(f, indent + 2)?;
+                    writeln!(f)?;
                 }
 
                 Ok(())
             }
-            EnterBlock { id } => write!(f, "enter B({})", id),
+            EnterBlock { id } => write!(f, "{:indent$}enter B({})", "", id, indent = indent),
             IfValueMatchesRunBlock { source, value, block } => {
-                write!(f, "if S({}) == {} then block {}", source, value, block)
+                write!(f, "{:indent$}if S({}) == {} then block {}", "", source, value, block, indent = indent)
             }
-            PlaceCommandLiteral(cmd) => write!(f, "/{}", cmd),
+            PlaceCommandLiteral(cmd) => write!(f, "{:indent$}/{}", "", cmd, indent = indent),
         }
+    }
+}
+
+impl Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_with_indent(f, 0)
     }
 }
 

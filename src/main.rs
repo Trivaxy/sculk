@@ -153,10 +153,8 @@ fn dump_ir(config: &Config, types: &TypePool, signatures: &HashMap<ResourceLocat
             ).as_str()
         );
 
-        s.push_str("\n");
-
         for instr in func.body() {
-            s.push_str(format!("    {}\n", instr).as_str());
+            s.push_str(format!("{}\n", instr).as_str());
         }
     }
 
