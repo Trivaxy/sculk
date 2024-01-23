@@ -368,7 +368,8 @@ impl<'a> IrFunctionBuilder<'a> {
         match self.locals.get(name) {
             Some(idx) => ValueLocation::new(*idx, 0, self.objective.clone()),
             None => {
-                let idx = self.locals.len();
+                let idx = self.next_slot;
+                self.next_slot += 1;
                 self.locals.insert(name.to_owned(), idx);
                 ValueLocation::new(idx, 0, self.objective.clone())
             }
