@@ -257,6 +257,27 @@ impl CodeGen {
                         CommandAction::Call(ResourceLocation::new(self.pack_name.clone(), format!("b{}", id)))
                     ];
 
+                    // TODO: deduplicate
+                    let (returns, breaks) = if let Some(block_info) = self.block_info.get(id) {
+                        (block_info.returns, block_info.breaks)
+                    } else {
+                        (false, false)
+                    };
+
+                    if returns {
+                        self.block_info.entry(block_id).or_insert(BlockInfo {
+                            returns: true,
+                            breaks: false
+                        }).returns = true;
+                    }
+
+                    if breaks {
+                        self.block_info.entry(block_id).or_insert(BlockInfo {
+                            returns: false,
+                            breaks: true
+                        }).breaks = true;
+                    }
+
                     ensure_control_flow(self, id, &mut actions);
 
                     CommandAction::Several(actions)
@@ -271,6 +292,27 @@ impl CodeGen {
                             run: Box::new(CommandAction::Call(ResourceLocation::new(self.pack_name.clone(), format!("b{}", block))))
                         }
                     ];
+
+                    // TODO: deduplicate
+                    let (returns, breaks) = if let Some(block_info) = self.block_info.get(block) {
+                        (block_info.returns, block_info.breaks)
+                    } else {
+                        (false, false)
+                    };
+
+                    if returns {
+                        self.block_info.entry(block_id).or_insert(BlockInfo {
+                            returns: true,
+                            breaks: false
+                        }).returns = true;
+                    }
+
+                    if breaks {
+                        self.block_info.entry(block_id).or_insert(BlockInfo {
+                            returns: false,
+                            breaks: true
+                        }).breaks = true;
+                    }
 
                     ensure_control_flow(self, block, &mut actions);
 
@@ -294,6 +336,7 @@ impl CodeGen {
     }
 }
 
+#[derive(Clone, Copy)]
 struct BlockInfo {
     returns: bool,
     breaks: bool
