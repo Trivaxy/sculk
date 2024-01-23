@@ -11,4 +11,16 @@ fn main() {
 	let y = 9;
 	let z = -2;
 	z = add(x, y, z);
+
+	let vec = Vector3(1, 2, 3);
+}
+
+struct Vector3 {
+	x: int
+	y: int
+	z: int
+
+	static fn single(x: int) -> Vector3 {
+		return Vector3(x, x, x);
+	}
 }

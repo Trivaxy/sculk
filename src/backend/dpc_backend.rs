@@ -68,10 +68,19 @@ fn dpc_codegen(
             .map(|_| DataType::Score(ScoreType::Score))
             .collect();
         let ret = function.signature().return_type();
-        let ret = if types.none() != ret {
-            ReturnType::Standard(vec![DataType::Score(ScoreType::Score)])
-        } else {
+        let ret = ret.from(types);
+        let ret = if ret.is_struct() {
+            let count = ret.as_struct_def().field_count();
+            ReturnType::Standard(
+                (0..count)
+                    .into_iter()
+                    .map(|_| DataType::Score(ScoreType::Score))
+                    .collect(),
+            )
+        } else if ret.is_none() {
             ReturnType::Void
+        } else {
+            ReturnType::Standard(vec![DataType::Score(ScoreType::Score)])
         };
         let annotations = FunctionAnnotations {
             preserve: true,
