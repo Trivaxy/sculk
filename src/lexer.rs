@@ -11,7 +11,7 @@ pub struct LexerExtras {
 #[derive(Clone, Logos, Debug, PartialEq)]
 #[logos(extras = LexerExtras)]
 pub enum Token<'a> {
-    #[regex(r"[0-9]+", |tok| tok.slice().parse())]
+    #[regex(r"-?[0-9]+", |tok| tok.slice().parse())]
     Number(i32),
 
     #[token("+")]
