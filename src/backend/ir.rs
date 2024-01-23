@@ -412,7 +412,7 @@ impl<'a> IrFunctionBuilder<'a> {
         match node.kind() {
             ParserNodeKind::NumberLiteral(n) => self.visit_number_literal(*n),
             ParserNodeKind::BoolLiteral(b) => self.visit_bool_literal(*b),
-            ParserNodeKind::Identifier(name) => self.visit_identifier(name),
+            ParserNodeKind::Identifier(_) => self.visit_identifier(node),
             ParserNodeKind::VariableDeclaration { name, expr, .. } => {
                 self.visit_variable_declaration(name.as_identifier(), expr);
                 ValueLocation::dummy()
@@ -499,11 +499,12 @@ impl<'a> IrFunctionBuilder<'a> {
         target
     }
 
-    fn visit_identifier(&mut self, name: &str) -> ValueLocation {
-        let source = self.get_local(name);
+    fn visit_identifier(&mut self, identifier: &ParserNode) -> ValueLocation {
+        let source = self.get_local(identifier.as_identifier());
         let target = self.get_free_location();
+        let size = self.tags.get_type(identifier).from(&self.types).total_size(&self.types);
 
-        self.emit(Instruction::SetValueToValue { source, target: target.clone() });
+        self.emit_value_copy(target.clone(), source, size);
 
         target
     }
@@ -696,14 +697,7 @@ impl<'a> IrFunctionBuilder<'a> {
         match expr {
             Some(expr) => {
                 let source = self.visit_node(expr);
-                //let target = ValueLocation::new(0, 0, Objective(format!("{}.return", self.objective.clone())));
                 let size = self.tags.get_type(expr).from(&self.types).total_size(&self.types);
-
-                //self.emit_value_copy(
-                //    target.clone(),
-                //    source,
-                //    size
-                //);
 
                 self.emit(Instruction::Return {
                     source: Some(source),
