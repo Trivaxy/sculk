@@ -40,8 +40,7 @@ impl ValueLocation {
 
 impl Display for ValueLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let offset = if self.offset == 0 { String::new() } else { format!(".{}", self.offset) };
-        write!(f, "{}{} {}", self.slot, if self.offset == 0 { "" } else { &offset }, self.objective)
+        write!(f, "{}.{} {}", self.slot, self.offset, self.objective)
     }
 }
 
@@ -613,8 +612,10 @@ impl<'a> IrFunctionBuilder<'a> {
 
         let mut args = vec![];
 
-        if let ResolvedPart::Method(_, _) = resolution.last() {
-            args.push(self.visit_node(expr)); // self parameter
+        if let ResolvedPart::Method(ty, name) = resolution.last() {
+            if !ty.from(&self.types).as_struct_def().function(&name).unwrap().is_static() {
+                args.push(self.visit_node(expr)); // self parameter
+            }
         }
 
         args.extend(params.iter().map(|arg| self.visit_node(arg)));
