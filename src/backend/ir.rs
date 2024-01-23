@@ -869,7 +869,7 @@ impl<'a> IrFunctionBuilder<'a> {
         let source = self.visit_node(expr);
         let target = self.get_free_location();
         let expr_type = self.tags.get_type(expr).from(&self.types).as_struct_def();
-
+        
         self.emit_value_copy(
             target.clone(),
             ValueLocation::new(
