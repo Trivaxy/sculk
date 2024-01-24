@@ -226,6 +226,16 @@ pub fn print_report(
                             .with_message(format!("cannot access member '{}', as it is not a field", name.fg(Color::Green)))
                             .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                     }
+                    ResolutionError::MethodNotStatic(name) => {
+                        report
+                            .with_message(format!("method '{}' is not static", name.fg(Color::Green)))
+                            .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                    }
+                    ResolutionError::StaticMethodDoesNotExist(ty, name) => {
+                        report
+                            .with_message(format!("type '{}' does not have a static method named '{}'", ty.from(&types).as_struct_def().name().fg(Color::Cyan), name.fg(Color::Green)))
+                            .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                    }
                 }
                 ValidationErrorKind::CannotReferenceMethodAsValue => {
                     report

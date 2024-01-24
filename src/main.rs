@@ -149,10 +149,8 @@ fn dump_ir(
     for func in funcs {
         s.push_str(format!("fn {}", func.objective(),).as_str());
 
-        s.push_str("\n");
-
         for instr in func.body() {
-            s.push_str(format!("    {}\n", instr).as_str());
+            s.push_str(format!("\n{}", instr).as_str());
         }
     }
 

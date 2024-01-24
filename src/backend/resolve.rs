@@ -225,6 +225,26 @@ impl<'a> Resolver<'a> {
                             ))
                         }
                     }
+                    ResolvedPart::Type(ty) => {
+                        let struct_def = ty.from(&self.types).as_struct_def();
+
+                        match struct_def.function(member) {
+                            Some(func) => {
+                                if func.is_static() {
+                                    resolution
+                                        .0
+                                        .push(ResolvedPart::Field(*ty, member.to_string())); // this gets auto-corrected to method
+                                    Ok(())
+                                } else {
+                                    Err(ResolutionError::MethodNotStatic(member.to_string()))
+                                }
+                            }
+                            None => Err(ResolutionError::StaticMethodDoesNotExist(
+                                *ty,
+                                member.to_string(),
+                            )),
+                        }
+                    }
                     _ => Err(ResolutionError::CannotAccessMember(member.to_string())),
                 }
             }
@@ -280,4 +300,6 @@ pub enum ResolutionError {
     CannotCallExpression,
     CannotCallMember(String),
     CannotAccessMember(String),
+    MethodNotStatic(String),
+    StaticMethodDoesNotExist(TypeKey, String),
 }

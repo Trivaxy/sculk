@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, sync::atomic::{AtomicUsize, Ordering}};
 
 use crate::{
     data::{Objective, ResourceLocation, ScoreboardOperationType, ScoreboardSlot},
@@ -48,18 +48,7 @@ impl ValueLocation {
 
 impl Display for ValueLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let offset = if self.offset == 0 {
-            String::new()
-        } else {
-            format!(".{}", self.offset)
-        };
-        write!(
-            f,
-            "{}{} {}",
-            self.slot,
-            if self.offset == 0 { "" } else { &offset },
-            self.objective
-        )
+        write!(f, "{}.{} {}", self.slot, self.offset, self.objective)
     }
 }
 
@@ -176,51 +165,51 @@ pub enum Instruction {
     PlaceCommandLiteral(String),
 }
 
-impl Display for Instruction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Instruction {
+    fn fmt_with_indent(&self, f: &mut std::fmt::Formatter<'_>, indent: usize) -> std::fmt::Result {
         use Instruction::*;
 
         match self {
             SetValueToValue { source, target } => {
-                write!(f, "set T({}) = S({})", target, source)
+                write!(f, "{:indent$}set T({}) = S({})", "", target, source, indent = indent)
             }
             SetValueToConstant { target, constant } => {
-                write!(f, "set T({}) = {}", target, constant)
+                write!(f, "{:indent$}set T({}) = {}", "", target, constant, indent = indent)
             }
             ValueBinaryOperation { source, target, op } => {
-                write!(f, "op T({}) = T({}) {} S({})", target, target, op, source)
+                write!(f, "{:indent$}op T({}) = T({}) {} S({})", "", target, target, op, source, indent = indent)
             }
-            ToggleValue { target } => write!(f, "op T({}) = !T({})", target, target),
-            ModifyValue { target, value } => write!(f, "op T({}) += {}", target, value),
-            Return { source, size } => write!(
-                f,
-                "return{}",
-                match source {
-                    Some(source) => format!(" S({}) SIZE={}", source, size),
-                    None => String::new(),
-                }
-            ),
-            Break => write!(f, "break"),
-            Call { function } => write!(f, "call {}", function),
+            ToggleValue { target } => write!(f, "{:indent$}op T({}) = !T({})", "", target, target, indent = indent),
+            ModifyValue { target, value } => write!(f, "{:indent$}op T({}) += {}", "", target, value, indent = indent),
+            Return { source, size } => write!(f, "{:indent$}return{}", "", match source {
+                Some(source) => format!(" S({}) SIZE={}", source, size),
+                None => String::new(),
+            }, indent = indent),
+            Break => write!(f, "{:indent$}break", "", indent = indent),
+            Call { function } => write!(f, "{:indent$}call {}", "", function, indent = indent),
             CreateBlock { id, is_loop, body } => {
-                write!(f, "block {} (loop: {})", id, is_loop)?;
+                writeln!(f)?;
+                writeln!(f, "{:indent$}block {} (loop: {})", "", id, is_loop, indent = indent)?;
 
                 for instr in body {
-                    write!(f, "\n    {}", instr)?;
+                    instr.fmt_with_indent(f, indent + 2)?;
+                    writeln!(f)?;
                 }
 
                 Ok(())
             }
-            EnterBlock { id } => write!(f, "enter B({})", id),
-            IfValueMatchesRunBlock {
-                source,
-                value,
-                block,
-            } => {
-                write!(f, "if S({}) == {} then block {}", source, value, block)
+            EnterBlock { id } => write!(f, "{:indent$}enter B({})", "", id, indent = indent),
+            IfValueMatchesRunBlock { source, value, block } => {
+                write!(f, "{:indent$}if S({}) == {} then block {}", "", source, value, block, indent = indent)
             }
-            PlaceCommandLiteral(cmd) => write!(f, "/{}", cmd),
+            PlaceCommandLiteral(cmd) => write!(f, "{:indent$}/{}", "", cmd, indent = indent),
         }
+    }
+}
+
+impl Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_with_indent(f, 0)
     }
 }
 
@@ -234,7 +223,6 @@ pub struct IrCompiler<'a> {
     global_functions: HashMap<ResourceLocation, FunctionSignature>,
     tags: TagPool<'a>,
     compiled_funcs: Vec<IrFunction>,
-    next_block_id: usize,
 }
 
 impl<'a> IrCompiler<'a> {
@@ -250,7 +238,6 @@ impl<'a> IrCompiler<'a> {
             global_functions,
             tags,
             compiled_funcs: Vec::new(),
-            next_block_id: 0,
         }
     }
 
@@ -349,13 +336,14 @@ impl IrFunction {
     }
 }
 
+static NEXT_BLOCK_ID: AtomicUsize = AtomicUsize::new(0);
+
 /// A helper struct that assists in building Sculk IR functions.
 struct IrFunctionBuilder<'a> {
     body: Vec<Instruction>,
     locals: HashMap<String, usize>,
     next_slot: usize,
     blocks: Vec<Vec<Instruction>>,
-    next_block_id: usize,
     objective: Objective,
     pack_name: String,
     global_functions: &'a HashMap<ResourceLocation, FunctionSignature>,
@@ -378,7 +366,6 @@ impl<'a> IrFunctionBuilder<'a> {
             locals: HashMap::new(),
             next_slot: 0,
             blocks: Vec::new(),
-            next_block_id: 0,
             objective,
             pack_name,
             global_functions,
@@ -422,7 +409,8 @@ impl<'a> IrFunctionBuilder<'a> {
         match self.locals.get(name) {
             Some(idx) => ValueLocation::new(*idx, 0, self.objective.clone()),
             None => {
-                let idx = self.locals.len();
+                let idx = self.next_slot;
+                self.next_slot += 1;
                 self.locals.insert(name.to_owned(), idx);
                 ValueLocation::new(idx, 0, self.objective.clone())
             }
@@ -435,13 +423,8 @@ impl<'a> IrFunctionBuilder<'a> {
         ValueLocation::new(slot, 0, self.objective.clone())
     }
 
-    fn create_block(
-        is_loop: bool,
-        builder: &mut Self,
-        emitted: impl FnOnce(usize, &mut Self),
-    ) -> usize {
-        let id = builder.next_block_id;
-        builder.next_block_id += 1;
+    fn create_block(is_loop: bool, builder: &mut Self, emitted: impl FnOnce(usize, &mut Self)) -> usize {
+        let id = NEXT_BLOCK_ID.fetch_add(1, Ordering::Relaxed);
 
         builder.blocks.push(Vec::new());
 
@@ -465,7 +448,7 @@ impl<'a> IrFunctionBuilder<'a> {
         match node.kind() {
             ParserNodeKind::NumberLiteral(n) => self.visit_number_literal(*n),
             ParserNodeKind::BoolLiteral(b) => self.visit_bool_literal(*b),
-            ParserNodeKind::Identifier(name) => self.visit_identifier(name),
+            ParserNodeKind::Identifier(_) => self.visit_identifier(node),
             ParserNodeKind::VariableDeclaration { name, expr, .. } => {
                 self.visit_variable_declaration(name.as_identifier(), expr);
                 ValueLocation::dummy()
@@ -552,14 +535,12 @@ impl<'a> IrFunctionBuilder<'a> {
         target
     }
 
-    fn visit_identifier(&mut self, name: &str) -> ValueLocation {
-        let source = self.get_local(name);
+    fn visit_identifier(&mut self, identifier: &ParserNode) -> ValueLocation {
+        let source = self.get_local(identifier.as_identifier());
         let target = self.get_free_location();
+        let size = self.tags.get_type(identifier).from(&self.types).total_size(&self.types);
 
-        self.emit(Instruction::SetValueToValue {
-            source,
-            target: target.clone(),
-        });
+        self.emit_value_copy(target.clone(), source, size);
 
         target
     }
@@ -680,8 +661,10 @@ impl<'a> IrFunctionBuilder<'a> {
 
         let mut args = vec![];
 
-        if let ResolvedPart::Method(_, _) = resolution.last() {
-            args.push(self.visit_node(expr)); // self parameter
+        if let ResolvedPart::Method(ty, name) = resolution.last() {
+            if !ty.from(&self.types).as_struct_def().function(&name).unwrap().is_static() {
+                args.push(self.visit_node(expr)); // self parameter
+            }
         }
 
         args.extend(params.iter().map(|arg| self.visit_node(arg)));
@@ -772,18 +755,7 @@ impl<'a> IrFunctionBuilder<'a> {
         match expr {
             Some(expr) => {
                 let source = self.visit_node(expr);
-                //let target = ValueLocation::new(0, 0, Objective(format!("{}.return", self.objective.clone())));
-                let size = self
-                    .tags
-                    .get_type(expr)
-                    .from(&self.types)
-                    .total_size(&self.types);
-
-                //self.emit_value_copy(
-                //    target.clone(),
-                //    source,
-                //    size
-                //);
+                let size = self.tags.get_type(expr).from(&self.types).total_size(&self.types);
 
                 self.emit(Instruction::Return {
                     source: Some(source),
