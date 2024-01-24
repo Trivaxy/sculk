@@ -95,7 +95,7 @@ fn dpc_codegen(
             .insert(function_id.into(), IRFunction { interface, block });
     }
 
-    // dbg!(&ir);
+    dbg!(&ir);
 
     let proj = ProjectSettingsBuilder::new(&config.pack);
     let proj = proj.op_level(OptimizationLevel::Basic);
@@ -185,6 +185,9 @@ fn codegen_block(
                             .or_insert_with(|| CallBuilder::from_obj(arg));
                         if entry.can_be_finished {
                             finished_calls.extend(calls.remove(arg));
+                            let mut new_call = CallBuilder::from_obj(arg);
+                            new_call.args.push(Value::Mutable(val));
+                            calls.insert(arg.to_string(), new_call);
                         } else {
                             entry.args.push(Value::Mutable(val));
                         }
