@@ -844,16 +844,8 @@ impl<'a> IrFunctionBuilder<'a> {
         
         self.emit_value_copy(
             target.clone(),
-            ValueLocation::new(
-                source.slot,
-                source.offset + expr_type.field_offset(member),
-                source.objective.clone(),
-            ),
-            self.types
-                .get_type_key(member)
-                .unwrap()
-                .from(&self.types)
-                .total_size(&self.types),
+            ValueLocation::new(source.slot, source.offset + expr_type.field_offset(member), source.objective.clone()),
+            expr_type.field(member).unwrap().field_type().from(&self.types).total_size(&self.types)
         );
 
         target

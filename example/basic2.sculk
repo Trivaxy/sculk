@@ -13,6 +13,8 @@ fn main() {
 	z = add(x, y, z);
 
 	let vec = Vector3(1, 2, 3);
+	let vec2 = Vector3.single(10);
+	add(vec2.x, vec2.y, vec2.z);
 }
 
 struct Vector3 {

@@ -42,6 +42,7 @@ fn dpc_codegen(
     let mut ir = IR::new();
     let mut blocks = HashMap::new();
     for function in functions {
+        let mut ret_len = 0;
         let mut defs = DefManager::new();
         let mut block = codegen_block(
             function.body(),
@@ -49,6 +50,7 @@ fn dpc_codegen(
             function.signature(),
             &mut blocks,
             &mut defs,
+            &mut ret_len,
         );
         // Insert hoisted defs
         let prelude = defs.hoisted_defs.into_iter().sorted().map(|x| {
@@ -69,18 +71,15 @@ fn dpc_codegen(
             .collect();
         let ret = function.signature().return_type();
         let ret = ret.from(types);
-        let ret = if ret.is_struct() {
-            let count = ret.as_struct_def().field_count();
+        let ret = if ret.is_none() {
+            ReturnType::Void
+        } else {
             ReturnType::Standard(
-                (0..count)
+                (0..ret_len)
                     .into_iter()
                     .map(|_| DataType::Score(ScoreType::Score))
                     .collect(),
             )
-        } else if ret.is_none() {
-            ReturnType::Void
-        } else {
-            ReturnType::Standard(vec![DataType::Score(ScoreType::Score)])
         };
         let annotations = FunctionAnnotations {
             preserve: true,
@@ -99,7 +98,7 @@ fn dpc_codegen(
     // dbg!(&ir);
 
     let proj = ProjectSettingsBuilder::new(&config.pack);
-    let proj = proj.op_level(OptimizationLevel::Full);
+    let proj = proj.op_level(OptimizationLevel::Basic);
     let settings = CodegenIRSettings {
         debug: false,
         debug_functions: false,
@@ -117,16 +116,18 @@ fn codegen_block(
     func_sig: &super::function::FunctionSignature,
     blocks: &mut HashMap<usize, Block>,
     defs: &mut DefManager,
+    ret_len: &mut usize,
 ) -> Block {
     let mut block = Block::new();
     let mut calls = HashMap::new();
+    let mut finished_calls = Vec::new();
     for (i, instr) in body.into_iter().enumerate() {
         let instr = match instr {
             Instruction::CreateBlock { id, is_loop, body } => {
                 if *is_loop {
                     panic!("Looping is not supported yet");
                 }
-                let subblock = codegen_block(body, func_obj, func_sig, blocks, defs);
+                let subblock = codegen_block(body, func_obj, func_sig, blocks, defs, ret_len);
                 blocks.insert(*id, subblock);
                 None
             }
@@ -136,19 +137,27 @@ fn codegen_block(
                 });
                 entry.pos = block.contents.len();
                 entry.resource_location = Some(function.to_string().into());
+                if entry.can_be_finished {
+                    finished_calls.extend(calls.remove(&function.path));
+                } else {
+                    entry.can_be_finished = true;
+                }
                 Some(InstrKind::Comment {
-                    comment: "Call should be inserted here".into(),
+                    comment: format!("call @{}", function),
                 })
             }
             Instruction::SetValueToConstant { target, constant } => {
                 let val =
                     Value::Constant(DataTypeContents::Score(ScoreTypeContents::Score(*constant)));
                 if let Some(arg) = target.objective.get_arg(func_obj) {
-                    calls
+                    let entry = calls
                         .entry(arg.to_string())
-                        .or_insert_with(|| CallBuilder::from_obj(arg))
-                        .args
-                        .push(val);
+                        .or_insert_with(|| CallBuilder::from_obj(arg));
+                    if entry.can_be_finished {
+                        finished_calls.extend(calls.remove(arg));
+                    } else {
+                        entry.args.push(val);
+                    }
                     None
                 } else {
                     defs.ensure_defined(target);
@@ -161,20 +170,24 @@ fn codegen_block(
             Instruction::SetValueToValue { target, source } => {
                 let val = source.get_val(func_sig);
                 if let Some(ret) = source.objective.get_ret(func_obj) {
-                    calls
+                    defs.ensure_defined(target);
+                    let entry = calls
                         .entry(ret.to_string())
-                        .or_insert_with(|| CallBuilder::from_obj(ret))
-                        .rets
-                        .push(target.get_val(func_sig));
+                        .or_insert_with(|| CallBuilder::from_obj(ret));
+                    entry.rets.push(target.get_val(func_sig));
+                    entry.can_be_finished = true;
                     None
                 } else {
                     defs.ensure_defined(source);
                     if let Some(arg) = target.objective.get_arg(func_obj) {
-                        calls
+                        let entry = calls
                             .entry(arg.to_string())
-                            .or_insert_with(|| CallBuilder::from_obj(arg))
-                            .args
-                            .push(Value::Mutable(val));
+                            .or_insert_with(|| CallBuilder::from_obj(arg));
+                        if entry.can_be_finished {
+                            finished_calls.extend(calls.remove(arg));
+                        } else {
+                            entry.args.push(Value::Mutable(val));
+                        }
                         None
                     } else {
                         defs.ensure_defined(target);
@@ -245,6 +258,7 @@ fn codegen_block(
                             }));
                     }
                 }
+                *ret_len = *size;
                 if i == body.len() - 1 {
                     None
                 } else {
@@ -262,14 +276,27 @@ fn codegen_block(
         }
     }
 
+    // dbg!(&calls);
+
     // Insert calls
-    for (_, call) in calls {
+    for call in calls
+        .into_iter()
+        .map(|x| x.1)
+        .chain(finished_calls.into_iter())
+    {
         if let Some(function) = call.resource_location {
-            block
+            let instr = block
                 .contents
                 .get_mut(call.pos)
-                .expect("Index should exist")
-                .kind = InstrKind::Call {
+                .expect("Index should exist");
+            if instr.kind
+                != (InstrKind::Comment {
+                    comment: format!("call @{}", function),
+                })
+            {
+                panic!("Call inserted in wrong place");
+            }
+            instr.kind = InstrKind::Call {
                 call: CallInterface {
                     function,
                     args: call.args,
@@ -407,6 +434,7 @@ impl BinaryOperation {
 /// Used for storing information about a call,
 /// which sculk IR splits up into multiple instructions,
 /// so that it can be combined for DPC
+#[derive(Debug)]
 struct CallBuilder {
     #[allow(dead_code)]
     func_id: String,
@@ -414,6 +442,7 @@ struct CallBuilder {
     resource_location: Option<DPCResourceLocation>,
     args: Vec<Value>,
     rets: Vec<MutableValue>,
+    can_be_finished: bool,
 }
 
 impl CallBuilder {
@@ -424,6 +453,7 @@ impl CallBuilder {
             resource_location: None,
             args: Vec::new(),
             rets: Vec::new(),
+            can_be_finished: false,
         }
     }
 
@@ -434,6 +464,7 @@ impl CallBuilder {
             resource_location: Some(loc.to_string().into()),
             args: Vec::new(),
             rets: Vec::new(),
+            can_be_finished: true,
         }
     }
 }
