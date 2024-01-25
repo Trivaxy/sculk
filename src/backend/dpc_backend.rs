@@ -95,10 +95,10 @@ fn dpc_codegen(
             .insert(function_id.into(), IRFunction { interface, block });
     }
 
-    dbg!(&ir);
+    // dbg!(&ir);
 
     let proj = ProjectSettingsBuilder::new(&config.pack);
-    let proj = proj.op_level(OptimizationLevel::Basic);
+    let proj = proj.op_level(OptimizationLevel::More);
     let settings = CodegenIRSettings {
         debug: false,
         debug_functions: false,
@@ -279,7 +279,7 @@ fn codegen_block(
         }
     }
 
-    // dbg!(&calls);
+    // dbg!(&calls, &finished_calls);
 
     // Insert calls
     for call in calls
@@ -474,7 +474,7 @@ impl CallBuilder {
 
 impl Objective {
     fn split(&self) -> (&str, Option<&str>) {
-        if let Some(period) = self.0.find('.') {
+        if let Some(period) = self.0.rfind('.') {
             let split = self.0.split_at(period);
             (split.0, Some(&split.1[1..]))
         } else {
@@ -483,7 +483,7 @@ impl Objective {
     }
 
     fn get_arg(&self, func_obj: &Objective) -> Option<&str> {
-        if self.split().1.is_none() && self.0 != func_obj.0 {
+        if self.0 != func_obj.0 {
             Some(&self.0)
         } else {
             None
