@@ -128,7 +128,8 @@ fn compile_file(config: &Config, path: &str) -> (Option<Info>, Result<(), Vec<Co
     }
 
     match config.backend.as_str() {
-        "default" => DPCBackend::compile(config, &funcs, &types),
+        "default" => DefaultBackend::compile(config, &funcs, &types),
+        "dpc" => DPCBackend::compile(config, &funcs, &types),
         _ => {
             println!("unknown backend: {}", config.backend);
             return (None, Err(Vec::new()));
