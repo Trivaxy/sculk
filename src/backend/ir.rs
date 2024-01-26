@@ -384,6 +384,7 @@ impl<'a> IrFunctionBuilder<'a> {
     }
 
     fn finish(self) -> IrFunction {
+        // TODO: avoid clone
         IrFunction::new(self.objective, self.body, self.signature.clone())
     }
 
