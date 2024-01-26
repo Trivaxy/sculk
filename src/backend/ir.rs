@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display, sync::atomic::{AtomicUsize, Ordering}};
 
 use crate::{
-    data::{Objective, ResourceLocation, ScoreboardSlot, ScoreboardOperationType},
+    data::{Objective, ResourceLocation, ScoreboardOperationType, ScoreboardSlot},
     parser::{Operation, ParserNode, ParserNodeKind},
 };
 
@@ -13,7 +13,7 @@ use super::{
     validate::{ScopeStack, TagPool},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ValueLocation {
     pub slot: usize,
     pub offset: usize,
@@ -26,6 +26,14 @@ impl ValueLocation {
             slot,
             offset,
             objective,
+        }
+    }
+
+    pub fn offset(&self, amt: usize) -> Self {
+        Self {
+            slot: self.slot,
+            offset: self.offset + amt,
+            objective: self.objective.clone(),
         }
     }
 
@@ -46,7 +54,11 @@ impl Display for ValueLocation {
 
 impl From<ValueLocation> for ScoreboardSlot {
     fn from(loc: ValueLocation) -> Self {
-        let offset = if loc.offset == 0 { String::new() } else { format!(".{}", loc.offset) };
+        let offset = if loc.offset == 0 {
+            String::new()
+        } else {
+            format!(".{}", loc.offset)
+        };
         ScoreboardSlot::new(loc.objective.clone(), format!("v{}{}", loc.slot, offset))
     }
 }
@@ -57,6 +69,7 @@ impl From<&ValueLocation> for ScoreboardSlot {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum BinaryOperation {
     Add,
     Subtract,
@@ -95,6 +108,7 @@ impl Display for BinaryOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Instruction {
     // Sets target to the value of source
     SetValueToValue {
@@ -250,12 +264,14 @@ impl<'a> IrCompiler<'a> {
             match node.kind() {
                 ParserNodeKind::FunctionDeclaration { name, body, .. } => {
                     let mut builder = IrFunctionBuilder::new(
-                        self.global_functions.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap(),
+                        self.global_functions
+                            .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
+                            .unwrap(),
                         Objective(name.clone()),
                         self.pack_name.clone(),
                         &self.global_functions,
                         &self.types,
-                        &self.tags
+                        &self.tags,
                     );
 
                     builder.visit_node(body);
@@ -265,12 +281,18 @@ impl<'a> IrCompiler<'a> {
                 ParserNodeKind::StructDefinition { name, members } => {
                     for method in members.iter().filter(|m| m.is_func_declaration()) {
                         let mut builder = IrFunctionBuilder::new(
-                            self.types.get_type_key(name).unwrap().from(&self.types).as_struct_def().function(method.as_func_name()).unwrap(),
+                            self.types
+                                .get_type_key(name)
+                                .unwrap()
+                                .from(&self.types)
+                                .as_struct_def()
+                                .function(method.as_func_name())
+                                .unwrap(),
                             Objective(format!("{}.{}", name, method.as_func_name())),
                             self.pack_name.clone(),
                             &self.global_functions,
                             &self.types,
-                            &self.tags
+                            &self.tags,
                         );
 
                         builder.visit_node(method.as_func_body());
@@ -285,16 +307,19 @@ impl<'a> IrCompiler<'a> {
 }
 
 /// A function that has been compiled into Sculk IR.
+#[derive(Debug)]
 pub struct IrFunction {
     objective: Objective,
     body: Vec<Instruction>,
+    signature: FunctionSignature,
 }
 
 impl IrFunction {
-    fn new(objective: Objective, body: Vec<Instruction>) -> Self {
+    fn new(objective: Objective, body: Vec<Instruction>, signature: FunctionSignature) -> Self {
         Self {
             objective,
-            body
+            body,
+            signature,
         }
     }
 
@@ -304,6 +329,10 @@ impl IrFunction {
 
     pub fn body(&self) -> &[Instruction] {
         &self.body
+    }
+
+    pub fn signature(&self) -> &FunctionSignature {
+        &self.signature
     }
 }
 
@@ -320,10 +349,18 @@ struct IrFunctionBuilder<'a> {
     global_functions: &'a HashMap<ResourceLocation, FunctionSignature>,
     types: &'a TypePool,
     tags: &'a TagPool<'a>,
+    signature: &'a FunctionSignature,
 }
 
 impl<'a> IrFunctionBuilder<'a> {
-    fn new(signature: &'a FunctionSignature, objective: Objective, pack_name: String, global_functions: &'a HashMap<ResourceLocation, FunctionSignature>, types: &'a TypePool, tags: &'a TagPool) -> Self {
+    fn new(
+        signature: &'a FunctionSignature,
+        objective: Objective,
+        pack_name: String,
+        global_functions: &'a HashMap<ResourceLocation, FunctionSignature>,
+        types: &'a TypePool,
+        tags: &'a TagPool,
+    ) -> Self {
         let mut s = Self {
             body: Vec::new(),
             locals: HashMap::new(),
@@ -333,7 +370,8 @@ impl<'a> IrFunctionBuilder<'a> {
             pack_name,
             global_functions,
             types,
-            tags
+            tags,
+            signature,
         };
 
         // Give the first local indices to the function parameters
@@ -346,7 +384,8 @@ impl<'a> IrFunctionBuilder<'a> {
     }
 
     fn finish(self) -> IrFunction {
-        IrFunction::new(self.objective, self.body)
+        // TODO: avoid clone
+        IrFunction::new(self.objective, self.body, self.signature.clone())
     }
 
     fn emit(&mut self, instr: Instruction) {
@@ -356,15 +395,12 @@ impl<'a> IrFunctionBuilder<'a> {
         }
     }
 
-    fn emit_value_copy(
-        &mut self,
-        target: ValueLocation,
-        source: ValueLocation,
-        size: usize,
-    ) {
+    fn emit_value_copy(&mut self, target: ValueLocation, source: ValueLocation, size: usize) {
         for i in 0..size {
-            let source = ValueLocation::new(source.slot, source.offset + i, source.objective.clone());
-            let target = ValueLocation::new(target.slot, target.offset + i, target.objective.clone());
+            let source =
+                ValueLocation::new(source.slot, source.offset + i, source.objective.clone());
+            let target =
+                ValueLocation::new(target.slot, target.offset + i, target.objective.clone());
 
             self.emit(Instruction::SetValueToValue { source, target });
         }
@@ -397,11 +433,7 @@ impl<'a> IrFunctionBuilder<'a> {
 
         let body = builder.blocks.pop().unwrap();
 
-        builder.emit(Instruction::CreateBlock {
-            id,
-            is_loop,
-            body
-        });
+        builder.emit(Instruction::CreateBlock { id, is_loop, body });
 
         id
     }
@@ -436,7 +468,7 @@ impl<'a> IrFunctionBuilder<'a> {
             ParserNodeKind::FunctionCall { .. } => match self.visit_function_call(node) {
                 Some(target) => target,
                 None => ValueLocation::dummy(),
-            }
+            },
             ParserNodeKind::Block(body) => {
                 self.visit_block(body);
                 ValueLocation::dummy()
@@ -521,7 +553,10 @@ impl<'a> IrFunctionBuilder<'a> {
         self.emit_value_copy(
             target,
             source,
-            self.tags.get_type(expr).from(&self.types).total_size(&self.types)
+            self.tags
+                .get_type(expr)
+                .from(&self.types)
+                .total_size(&self.types),
         );
     }
 
@@ -533,7 +568,10 @@ impl<'a> IrFunctionBuilder<'a> {
         self.emit_value_copy(
             target,
             source,
-            self.tags.get_type(expr).from(&self.types).total_size(&self.types)
+            self.tags
+                .get_type(expr)
+                .from(&self.types)
+                .total_size(&self.types),
         );
     }
 
@@ -563,7 +601,11 @@ impl<'a> IrFunctionBuilder<'a> {
         let target = self.visit_node(lhs);
         let source = self.visit_node(rhs);
 
-        self.emit(Instruction::ValueBinaryOperation { source, target: target.clone(), op });
+        self.emit(Instruction::ValueBinaryOperation {
+            source,
+            target: target.clone(),
+            op,
+        });
 
         target
     }
@@ -587,7 +629,9 @@ impl<'a> IrFunctionBuilder<'a> {
                 });
             }
             Operation::Not => {
-                self.emit(Instruction::ToggleValue { target: target.clone() });
+                self.emit(Instruction::ToggleValue {
+                    target: target.clone(),
+                });
             }
             _ => unreachable!(),
         }
@@ -625,7 +669,7 @@ impl<'a> IrFunctionBuilder<'a> {
         }
 
         args.extend(params.iter().map(|arg| self.visit_node(arg)));
-        
+
         let func_objective;
         let func_signature;
         let handle_return;
@@ -653,9 +697,13 @@ impl<'a> IrFunctionBuilder<'a> {
 
                 for (param, arg) in struct_def.constructor().params().iter().zip(args) {
                     self.emit_value_copy(
-                        ValueLocation::new(target.slot, target.offset + struct_def.field_offset(param.name()), target.objective.clone()),
+                        ValueLocation::new(
+                            target.slot,
+                            target.offset + struct_def.field_offset(param.name()),
+                            target.objective.clone(),
+                        ),
                         arg,
-                        param.param_type().from(&self.types).total_size(&self.types)
+                        param.param_type().from(&self.types).total_size(&self.types),
                     );
                 }
 
@@ -670,7 +718,7 @@ impl<'a> IrFunctionBuilder<'a> {
             self.emit_value_copy(
                 target,
                 arg,
-                param.param_type().from(&self.types).total_size(&self.types)
+                param.param_type().from(&self.types).total_size(&self.types),
             );
         }
 
@@ -680,12 +728,16 @@ impl<'a> IrFunctionBuilder<'a> {
 
         if handle_return {
             let target = self.get_free_location();
-            let source = ValueLocation::new(0, 0, Objective(format!("{}.return", func_objective.0)));
+            let source =
+                ValueLocation::new(0, 0, Objective(format!("{}.return", func_objective.0)));
 
             self.emit_value_copy(
                 target.clone(),
                 source,
-                self.tags.get_type(node).from(&self.types).total_size(&self.types)
+                self.tags
+                    .get_type(node)
+                    .from(&self.types)
+                    .total_size(&self.types),
             );
 
             Some(target)
@@ -708,13 +760,13 @@ impl<'a> IrFunctionBuilder<'a> {
 
                 self.emit(Instruction::Return {
                     source: Some(source),
-                    size
+                    size,
                 });
             }
             None => {
                 self.emit(Instruction::Return {
                     source: None,
-                    size: 0
+                    size: 0,
                 });
             }
         }
@@ -729,9 +781,9 @@ impl<'a> IrFunctionBuilder<'a> {
         let true_body = Self::create_block(false, self, |_, builder| {
             builder.visit_node(body);
         });
-        
+
         let else_body = else_body.as_ref().map(|else_body| {
-            Self::create_block(false, self,|_, builder| {
+            Self::create_block(false, self, |_, builder| {
                 builder.visit_node(else_body);
             })
         });
@@ -817,10 +869,6 @@ impl<'a> IrFunctionBuilder<'a> {
             }
         }
 
-        ValueLocation::new(
-            slot,
-            offset,
-            self.objective.clone(),
-        )
+        ValueLocation::new(slot, offset, self.objective.clone())
     }
 }

@@ -2,11 +2,13 @@ use std::{collections::HashMap, path::Path};
 
 use backend::{
     codegen::CompiledFunction,
+    dpc_backend::DPCBackend,
     function::FunctionSignature,
     ir::{IrCompiler, IrFunction},
     type_pool::TypePool,
     types::SculkType,
-    validate::{Validator, ValidatorOutput}, DefaultBackend, Backend,
+    validate::{Validator, ValidatorOutput},
+    Backend, DefaultBackend,
 };
 use data::ResourceLocation;
 use error::CompileError;
@@ -74,13 +76,7 @@ fn main() {
     }
 }
 
-fn compile_file(
-    config: &Config,
-    path: &str,
-) -> (
-    Option<Info>,
-    Result<(), Vec<CompileError>>,
-) {
+fn compile_file(config: &Config, path: &str) -> (Option<Info>, Result<(), Vec<CompileError>>) {
     let file_content = match std::fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) => {
@@ -120,7 +116,7 @@ fn compile_file(
         config.pack.clone(),
         validator_output.types,
         validator_output.global_functions,
-        validator_output.tags
+        validator_output.tags,
     );
 
     ir_compiler.visit_program(parser_output.ast.as_program());
@@ -132,7 +128,8 @@ fn compile_file(
     }
 
     match config.backend.as_str() {
-        "default" => DefaultBackend::compile(config, &funcs),
+        "default" => DefaultBackend::compile(config, &funcs, &types),
+        "dpc" => DPCBackend::compile(config, &funcs, &types),
         _ => {
             println!("unknown backend: {}", config.backend);
             return (None, Err(Vec::new()));
@@ -142,16 +139,16 @@ fn compile_file(
     (Some(Info { types, signatures }), Ok(()))
 }
 
-fn dump_ir(config: &Config, types: &TypePool, signatures: &HashMap<ResourceLocation, FunctionSignature>, funcs: &[IrFunction]) {
+fn dump_ir(
+    config: &Config,
+    types: &TypePool,
+    signatures: &HashMap<ResourceLocation, FunctionSignature>,
+    funcs: &[IrFunction],
+) {
     let mut s = String::new();
 
     for func in funcs {
-        s.push_str(
-            format!(
-                "fn {}",
-                func.objective(),
-            ).as_str()
-        );
+        s.push_str(format!("fn {}", func.objective(),).as_str());
 
         for instr in func.body() {
             s.push_str(format!("\n{}", instr).as_str());

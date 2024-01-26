@@ -1,0 +1,28 @@
+fn add(a: int, b: int, c: int) -> int {
+	return add2(a, b) + c;
+}
+
+fn add2(a: int, b: int) -> int {
+	return a + b;
+}
+
+fn main() {
+	let x = 7;
+	let y = 9;
+	let z = -2;
+	z = add(x, y, z);
+
+	let vec = Vector3(1, 2, 3);
+	let vec2 = Vector3.single(10);
+	add(vec2.x, vec2.y, vec2.z);
+}
+
+struct Vector3 {
+	x: int
+	y: int
+	z: int
+
+	static fn single(x: int) -> Vector3 {
+		return Vector3(x, x, x);
+	}
+}

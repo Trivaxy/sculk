@@ -21,7 +21,7 @@ impl Display for ResourceLocation {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Objective(pub String);
 
 impl Objective {
