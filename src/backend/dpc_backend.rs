@@ -28,7 +28,7 @@ impl Backend for DPCBackend {
     fn compile(config: &Config, ir: &[IrFunction], types: &TypePool) {
         let datapack = dpc_codegen(ir, config, types).expect("Failed to do DPC codegen");
         datapack
-            .output(&PathBuf::from("./pack"))
+            .output(&PathBuf::from(format!("./{}", config.pack)))
             .expect("Failed to output pack");
     }
 }
