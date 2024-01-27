@@ -1,15 +1,19 @@
-use std::{sync::atomic::{AtomicI32, Ordering}, fmt::{Display, Formatter}, collections::HashMap};
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter},
+    sync::atomic::AtomicI32,
+};
 
-use crate::{data::{ResourceLocation, ScoreboardSlot, ScoreboardOperationType, Objective}, parser::Operation};
+use crate::data::{Objective, ResourceLocation, ScoreboardOperationType, ScoreboardSlot};
 
-use super::ir::{IrFunction, Instruction, BinaryOperation, ValueLocation};
+use super::ir::{BinaryOperation, Instruction, IrFunction, ValueLocation};
 
 static ANON_FUNC_COUNT: AtomicI32 = AtomicI32::new(0);
 
 pub struct CodeGen {
     pack_name: String,
     functions: Vec<CompiledFunction>,
-    block_info: HashMap<usize, BlockInfo>
+    block_info: HashMap<usize, BlockInfo>,
 }
 
 impl CodeGen {
@@ -17,7 +21,7 @@ impl CodeGen {
         Self {
             pack_name,
             functions: Vec::new(),
-            block_info: HashMap::new()
+            block_info: HashMap::new(),
         }
     }
 
@@ -43,25 +47,31 @@ impl CodeGen {
                 if block_info.returns {
                     actions.push(CommandAction::ExecuteIf {
                         condition: Condition::ScoreMatches {
-                            a: ScoreboardSlot::new(Objective(format!("{}.return", objective)), "flag".to_string()),
-                            b: 1
+                            a: ScoreboardSlot::new(
+                                Objective(format!("{}.return", objective)),
+                                "flag".to_string(),
+                            ),
+                            b: 1,
                         },
-                        run: Box::new(CommandAction::Return)
+                        run: Box::new(CommandAction::Return),
                     });
                 }
 
                 if block_info.breaks {
                     actions.push(CommandAction::ExecuteIf {
                         condition: Condition::ScoreMatches {
-                            a: ScoreboardSlot::new(Objective(format!("{}.break", objective)), "flag".to_string()),
-                            b: 1
+                            a: ScoreboardSlot::new(
+                                Objective(format!("{}.break", objective)),
+                                "flag".to_string(),
+                            ),
+                            b: 1,
                         },
-                        run: Box::new(CommandAction::Return)
+                        run: Box::new(CommandAction::Return),
                     });
                 }
             }
         };
-    
+
         for instr in ir {
             actions.push(match instr {
                 Instruction::SetValueToValue { source, target } => {
@@ -77,99 +87,115 @@ impl CodeGen {
                         value: *constant,
                     }
                 }
-                Instruction::ValueBinaryOperation { source, target, op } => {
-                    match *op {
-                        BinaryOperation::Add => CommandAction::ScoreboardOperation {
+                Instruction::ValueBinaryOperation { source, target, op } => match *op {
+                    BinaryOperation::Add => CommandAction::ScoreboardOperation {
+                        op: ScoreboardOperationType::Add,
+                        a: ScoreboardSlot::from(target),
+                        b: ScoreboardSlot::from(source),
+                    },
+                    BinaryOperation::Subtract => CommandAction::ScoreboardOperation {
+                        op: ScoreboardOperationType::Subtract,
+                        a: ScoreboardSlot::from(target),
+                        b: ScoreboardSlot::from(source),
+                    },
+                    BinaryOperation::Multiply => CommandAction::ScoreboardOperation {
+                        op: ScoreboardOperationType::Multiply,
+                        a: ScoreboardSlot::from(target),
+                        b: ScoreboardSlot::from(source),
+                    },
+                    BinaryOperation::Divide => CommandAction::ScoreboardOperation {
+                        op: ScoreboardOperationType::Divide,
+                        a: ScoreboardSlot::from(target),
+                        b: ScoreboardSlot::from(source),
+                    },
+                    BinaryOperation::Modulo => CommandAction::ScoreboardOperation {
+                        op: ScoreboardOperationType::Modulo,
+                        a: ScoreboardSlot::from(target),
+                        b: ScoreboardSlot::from(source),
+                    },
+                    BinaryOperation::GreaterThan => CommandAction::ExecuteIf {
+                        condition: Condition::ScoreCompare {
+                            a: ScoreboardSlot::from(target),
+                            b: ScoreboardSlot::from(source),
+                            op: ConditionOperator::GreaterThan,
+                        },
+                        run: Box::new(CommandAction::SetScoreboardEntry {
+                            entry: ScoreboardSlot::from(target),
+                            value: 1,
+                        }),
+                    },
+                    BinaryOperation::LessThan => CommandAction::ExecuteIf {
+                        condition: Condition::ScoreCompare {
+                            a: ScoreboardSlot::from(target),
+                            b: ScoreboardSlot::from(source),
+                            op: ConditionOperator::LessThan,
+                        },
+                        run: Box::new(CommandAction::SetScoreboardEntry {
+                            entry: ScoreboardSlot::from(target),
+                            value: 1,
+                        }),
+                    },
+                    BinaryOperation::GreaterThanOrEquals => CommandAction::ExecuteIf {
+                        condition: Condition::ScoreCompare {
+                            a: ScoreboardSlot::from(target),
+                            b: ScoreboardSlot::from(source),
+                            op: ConditionOperator::GreaterThanOrEquals,
+                        },
+                        run: Box::new(CommandAction::SetScoreboardEntry {
+                            entry: ScoreboardSlot::from(target),
+                            value: 1,
+                        }),
+                    },
+                    BinaryOperation::LessThanOrEquals => CommandAction::ExecuteIf {
+                        condition: Condition::ScoreCompare {
+                            a: ScoreboardSlot::from(target),
+                            b: ScoreboardSlot::from(source),
+                            op: ConditionOperator::LessThanOrEquals,
+                        },
+                        run: Box::new(CommandAction::SetScoreboardEntry {
+                            entry: ScoreboardSlot::from(target),
+                            value: 1,
+                        }),
+                    },
+                    BinaryOperation::CheckEquals => CommandAction::ExecuteIf {
+                        condition: Condition::ScoreCompare {
+                            a: ScoreboardSlot::from(target),
+                            b: ScoreboardSlot::from(source),
+                            op: ConditionOperator::Equals,
+                        },
+                        run: Box::new(CommandAction::SetScoreboardEntry {
+                            entry: ScoreboardSlot::from(target),
+                            value: 1,
+                        }),
+                    },
+                    BinaryOperation::NotEquals => CommandAction::ExecuteUnless {
+                        condition: Condition::ScoreCompare {
+                            a: ScoreboardSlot::from(target),
+                            b: ScoreboardSlot::from(source),
+                            op: ConditionOperator::Equals,
+                        },
+                        run: Box::new(CommandAction::SetScoreboardEntry {
+                            entry: ScoreboardSlot::from(target),
+                            value: 1,
+                        }),
+                    },
+                    BinaryOperation::And => CommandAction::ScoreboardOperation {
+                        op: ScoreboardOperationType::Multiply,
+                        a: ScoreboardSlot::from(target),
+                        b: ScoreboardSlot::from(source),
+                    },
+                    BinaryOperation::Or => CommandAction::Several(vec![
+                        CommandAction::ScoreboardOperation {
                             op: ScoreboardOperationType::Add,
                             a: ScoreboardSlot::from(target),
                             b: ScoreboardSlot::from(source),
                         },
-                        BinaryOperation::Subtract => CommandAction::ScoreboardOperation {
-                            op: ScoreboardOperationType::Subtract,
-                            a: ScoreboardSlot::from(target),
-                            b: ScoreboardSlot::from(source),
-                        },
-                        BinaryOperation::Multiply => CommandAction::ScoreboardOperation {
-                            op: ScoreboardOperationType::Multiply,
-                            a: ScoreboardSlot::from(target),
-                            b: ScoreboardSlot::from(source),
-                        },
-                        BinaryOperation::Divide => CommandAction::ScoreboardOperation {
+                        CommandAction::ScoreboardOperation {
                             op: ScoreboardOperationType::Divide,
                             a: ScoreboardSlot::from(target),
                             b: ScoreboardSlot::from(source),
                         },
-                        BinaryOperation::Modulo => CommandAction::ScoreboardOperation {
-                            op: ScoreboardOperationType::Modulo,
-                            a: ScoreboardSlot::from(target),
-                            b: ScoreboardSlot::from(source),
-                        },
-                        BinaryOperation::GreaterThan => CommandAction::ExecuteIf {
-                            condition: Condition::ScoreCompare {
-                                a: ScoreboardSlot::from(target),
-                                b: ScoreboardSlot::from(source),
-                                op: ConditionOperator::GreaterThan,
-                            },
-                            run: Box::new(CommandAction::SetScoreboardEntry { entry: ScoreboardSlot::from(target), value: 1 })
-                        },
-                        BinaryOperation::LessThan => CommandAction::ExecuteIf {
-                            condition: Condition::ScoreCompare {
-                                a: ScoreboardSlot::from(target),
-                                b: ScoreboardSlot::from(source),
-                                op: ConditionOperator::LessThan,
-                            },
-                            run: Box::new(CommandAction::SetScoreboardEntry { entry: ScoreboardSlot::from(target), value: 1 })
-                        },
-                        BinaryOperation::GreaterThanOrEquals => CommandAction::ExecuteIf {
-                            condition: Condition::ScoreCompare {
-                                a: ScoreboardSlot::from(target),
-                                b: ScoreboardSlot::from(source),
-                                op: ConditionOperator::GreaterThanOrEquals,
-                            },
-                            run: Box::new(CommandAction::SetScoreboardEntry { entry: ScoreboardSlot::from(target), value: 1 })
-                        },
-                        BinaryOperation::LessThanOrEquals => CommandAction::ExecuteIf {
-                            condition: Condition::ScoreCompare {
-                                a: ScoreboardSlot::from(target),
-                                b: ScoreboardSlot::from(source),
-                                op: ConditionOperator::LessThanOrEquals,
-                            },
-                            run: Box::new(CommandAction::SetScoreboardEntry { entry: ScoreboardSlot::from(target), value: 1 })
-                        },
-                        BinaryOperation::CheckEquals => CommandAction::ExecuteIf {
-                            condition: Condition::ScoreCompare {
-                                a: ScoreboardSlot::from(target),
-                                b: ScoreboardSlot::from(source),
-                                op: ConditionOperator::Equals,
-                            },
-                            run: Box::new(CommandAction::SetScoreboardEntry { entry: ScoreboardSlot::from(target), value: 1 })
-                        },
-                        BinaryOperation::NotEquals => CommandAction::ExecuteUnless {
-                            condition: Condition::ScoreCompare {
-                                a: ScoreboardSlot::from(target),
-                                b: ScoreboardSlot::from(source),
-                                op: ConditionOperator::Equals,
-                            },
-                            run: Box::new(CommandAction::SetScoreboardEntry { entry: ScoreboardSlot::from(target), value: 1 })
-                        },
-                        BinaryOperation::And => CommandAction::ScoreboardOperation {
-                            op: ScoreboardOperationType::Multiply,
-                            a: ScoreboardSlot::from(target),
-                            b: ScoreboardSlot::from(source),
-                        },
-                        BinaryOperation::Or => CommandAction::Several(vec![
-                            CommandAction::ScoreboardOperation {
-                                op: ScoreboardOperationType::Add,
-                                a: ScoreboardSlot::from(target),
-                                b: ScoreboardSlot::from(source),
-                            },
-                            CommandAction::ScoreboardOperation {
-                                op: ScoreboardOperationType::Divide,
-                                a: ScoreboardSlot::from(target),
-                                b: ScoreboardSlot::from(source),
-                            },
-                        ]),
-                    }
+                    ]),
                 },
                 Instruction::ToggleValue { target } => CommandAction::Several(vec![
                     CommandAction::ScoreboardRemove {
@@ -185,26 +211,27 @@ impl CodeGen {
                             entry: ScoreboardSlot::from(target),
                             value: 1,
                         }),
-                    }
+                    },
                 ]),
-                Instruction::ModifyValue { target, value } => {
-                    match value {
-                        0.. => CommandAction::ScoreboardAdd {
-                            entry: ScoreboardSlot::from(target),
-                            value: *value,
-                        },
-                        _ => CommandAction::ScoreboardRemove {
-                            entry: ScoreboardSlot::from(target),
-                            value: -*value,
-                        },
-                    }
-                }
+                Instruction::ModifyValue { target, value } => match value {
+                    0.. => CommandAction::ScoreboardAdd {
+                        entry: ScoreboardSlot::from(target),
+                        value: *value,
+                    },
+                    _ => CommandAction::ScoreboardRemove {
+                        entry: ScoreboardSlot::from(target),
+                        value: -*value,
+                    },
+                },
                 Instruction::Call { function } => CommandAction::Call(function.clone()),
                 Instruction::Return { source, size } => {
-                    self.block_info.entry(block_id).or_insert(BlockInfo {
-                        returns: true,
-                        breaks: false
-                    }).returns = true;
+                    self.block_info
+                        .entry(block_id)
+                        .or_insert(BlockInfo {
+                            returns: true,
+                            breaks: false,
+                        })
+                        .returns = true;
 
                     let mut actions = vec![];
 
@@ -212,14 +239,25 @@ impl CodeGen {
                         for i in 0..*size {
                             actions.push(CommandAction::ScoreboardOperation {
                                 op: ScoreboardOperationType::Set,
-                                a: ScoreboardSlot::from(ValueLocation::new(0, i, Objective(format!("{}.return", objective)))),
-                                b: ScoreboardSlot::from(ValueLocation::new(source.slot, source.offset + i, source.objective.clone())),
+                                a: ScoreboardSlot::from(ValueLocation::new(
+                                    0,
+                                    i,
+                                    Objective(format!("{}.return", objective)),
+                                )),
+                                b: ScoreboardSlot::from(ValueLocation::new(
+                                    source.slot,
+                                    source.offset + i,
+                                    source.objective.clone(),
+                                )),
                             });
                         }
                     }
 
                     actions.push(CommandAction::SetScoreboardEntry {
-                        entry: ScoreboardSlot::new(Objective(format!("{}.return", objective)), "flag".to_string()),
+                        entry: ScoreboardSlot::new(
+                            Objective(format!("{}.return", objective)),
+                            "flag".to_string(),
+                        ),
                         value: 1,
                     });
 
@@ -228,14 +266,20 @@ impl CodeGen {
                     CommandAction::Several(actions)
                 }
                 Instruction::Break => {
-                    self.block_info.entry(block_id).or_insert(BlockInfo {
-                        returns: false,
-                        breaks: true
-                    }).breaks = true;
-    
+                    self.block_info
+                        .entry(block_id)
+                        .or_insert(BlockInfo {
+                            returns: false,
+                            breaks: true,
+                        })
+                        .breaks = true;
+
                     CommandAction::Several(vec![
                         CommandAction::SetScoreboardEntry {
-                            entry: ScoreboardSlot::new(Objective(format!("{}.break", objective)), "flag".to_string()),
+                            entry: ScoreboardSlot::new(
+                                Objective(format!("{}.break", objective)),
+                                "flag".to_string(),
+                            ),
                             value: 1,
                         },
                         CommandAction::Return,
@@ -253,9 +297,10 @@ impl CodeGen {
                     CommandAction::Noop
                 }
                 Instruction::EnterBlock { id } => {
-                    let mut actions = vec![
-                        CommandAction::Call(ResourceLocation::new(self.pack_name.clone(), format!("b{}", id)))
-                    ];
+                    let mut actions = vec![CommandAction::Call(ResourceLocation::new(
+                        self.pack_name.clone(),
+                        format!("b{}", id),
+                    ))];
 
                     // TODO: deduplicate
                     let (returns, breaks) = if let Some(block_info) = self.block_info.get(id) {
@@ -265,33 +310,44 @@ impl CodeGen {
                     };
 
                     if returns {
-                        self.block_info.entry(block_id).or_insert(BlockInfo {
-                            returns: true,
-                            breaks: false
-                        }).returns = true;
+                        self.block_info
+                            .entry(block_id)
+                            .or_insert(BlockInfo {
+                                returns: true,
+                                breaks: false,
+                            })
+                            .returns = true;
                     }
 
                     if breaks {
-                        self.block_info.entry(block_id).or_insert(BlockInfo {
-                            returns: false,
-                            breaks: true
-                        }).breaks = true;
+                        self.block_info
+                            .entry(block_id)
+                            .or_insert(BlockInfo {
+                                returns: false,
+                                breaks: true,
+                            })
+                            .breaks = true;
                     }
 
                     ensure_control_flow(self, id, &mut actions);
 
                     CommandAction::Several(actions)
                 }
-                Instruction::IfValueMatchesRunBlock { source, value, block } => {
-                    let mut actions = vec![
-                        CommandAction::ExecuteIf {
-                            condition: Condition::ScoreMatches {
-                                a: ScoreboardSlot::from(source),
-                                b: *value
-                            },
-                            run: Box::new(CommandAction::Call(ResourceLocation::new(self.pack_name.clone(), format!("b{}", block))))
-                        }
-                    ];
+                Instruction::IfValueMatchesRunBlock {
+                    source,
+                    value,
+                    block,
+                } => {
+                    let mut actions = vec![CommandAction::ExecuteIf {
+                        condition: Condition::ScoreMatches {
+                            a: ScoreboardSlot::from(source),
+                            b: *value,
+                        },
+                        run: Box::new(CommandAction::Call(ResourceLocation::new(
+                            self.pack_name.clone(),
+                            format!("b{}", block),
+                        ))),
+                    }];
 
                     // TODO: deduplicate
                     let (returns, breaks) = if let Some(block_info) = self.block_info.get(block) {
@@ -301,36 +357,44 @@ impl CodeGen {
                     };
 
                     if returns {
-                        self.block_info.entry(block_id).or_insert(BlockInfo {
-                            returns: true,
-                            breaks: false
-                        }).returns = true;
+                        self.block_info
+                            .entry(block_id)
+                            .or_insert(BlockInfo {
+                                returns: true,
+                                breaks: false,
+                            })
+                            .returns = true;
                     }
 
                     if breaks {
-                        self.block_info.entry(block_id).or_insert(BlockInfo {
-                            returns: false,
-                            breaks: true
-                        }).breaks = true;
+                        self.block_info
+                            .entry(block_id)
+                            .or_insert(BlockInfo {
+                                returns: false,
+                                breaks: true,
+                            })
+                            .breaks = true;
                     }
 
                     ensure_control_flow(self, block, &mut actions);
 
                     CommandAction::Several(actions)
                 }
-                Instruction::PlaceCommandLiteral(literal) => CommandAction::Literal(literal.clone()),
+                Instruction::PlaceCommandLiteral(literal) => {
+                    CommandAction::Literal(literal.clone())
+                }
             });
         }
-    
+
         if block_id != usize::MAX {
             self.functions.push(CompiledFunction {
                 name: ResourceLocation::new(self.pack_name.clone(), format!("b{}", block_id)),
-                actions
+                actions,
             });
         } else {
             self.functions.push(CompiledFunction {
                 name: ResourceLocation::new(self.pack_name.clone(), objective.clone().0),
-                actions
+                actions,
             });
         }
     }
@@ -339,7 +403,7 @@ impl CodeGen {
 #[derive(Clone, Copy)]
 struct BlockInfo {
     returns: bool,
-    breaks: bool
+    breaks: bool,
 }
 
 pub enum CommandAction {
@@ -398,7 +462,15 @@ impl Display for CommandAction {
                 write!(f, "execute unless {} run {}", condition, run)
             }
             CommandAction::Several(actions) => {
-                write!(f, "{}", actions.iter().map(|a| format!("{}", a)).collect::<Vec<String>>().join("\n"))
+                write!(
+                    f,
+                    "{}",
+                    actions
+                        .iter()
+                        .map(|a| format!("{}", a))
+                        .collect::<Vec<String>>()
+                        .join("\n")
+                )
             }
             CommandAction::Call(location) => write!(f, "function {}", location),
             CommandAction::Return => write!(f, "return 0"),
@@ -415,8 +487,8 @@ pub enum Condition {
     },
     ScoreMatches {
         a: ScoreboardSlot,
-        b: i32
-    }
+        b: i32,
+    },
 }
 
 impl Display for Condition {

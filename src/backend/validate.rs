@@ -1,4 +1,4 @@
-use std::{cell::Cell, collections::HashMap, env::ArgsOs, ops::Range, rc::Rc};
+use std::{collections::HashMap, ops::Range};
 
 use by_address::ByAddress;
 
@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     function::{FunctionSignature, ParamDef},
-    resolve::{self, ResolvedPart, ResolutionError, Resolver, Resolution},
+    resolve::{Resolution, ResolutionError, ResolvedPart, Resolver},
 };
 
 // The validation stage happens right after the parser produces an AST
@@ -75,15 +75,16 @@ impl<'a> Validator<'a> {
                 ..
             } => {
                 if *is_static && self.current_struct.is_none() {
-                    self.errors.add(
-                        ValidationErrorKind::StaticNotAllowed,
-                        node.span(),
-                    );
+                    self.errors
+                        .add(ValidationErrorKind::StaticNotAllowed, node.span());
                 }
 
                 let func_signature = match self.current_struct {
                     Some(ty) => ty.from(&self.types).as_struct_def().function(name).unwrap(),
-                    None => self.global_functions.get(&ResourceLocation::new(self.pack_name.clone(), name.clone())).unwrap(),
+                    None => self
+                        .global_functions
+                        .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
+                        .unwrap(),
                 };
 
                 self.current_return_type = Some(func_signature.return_type());
@@ -98,7 +99,8 @@ impl<'a> Validator<'a> {
                 self.scope_stack.push();
 
                 if !is_static && self.current_struct.is_some() {
-                    self.scope_stack.register_variable("self".to_string(), self.current_struct.unwrap());
+                    self.scope_stack
+                        .register_variable("self".to_string(), self.current_struct.unwrap());
                 }
 
                 func_signature.params().iter().for_each(|param| {
@@ -204,18 +206,16 @@ impl<'a> Validator<'a> {
             }
             ParserNodeKind::NumberLiteral(_) => self.types.int(),
             ParserNodeKind::BoolLiteral(_) => self.types.bool(),
-            ParserNodeKind::Identifier(ident) => {
-                match self.scope_stack.find_variable_type(ident) {
-                    Some(ty) => ty,
-                    None => {
-                        self.errors.add(
-                            ValidationErrorKind::UnknownVariable(ident.clone()),
-                            node.span(),
-                        );
-                        self.types.unknown()
-                    }
+            ParserNodeKind::Identifier(ident) => match self.scope_stack.find_variable_type(ident) {
+                Some(ty) => ty,
+                None => {
+                    self.errors.add(
+                        ValidationErrorKind::UnknownVariable(ident.clone()),
+                        node.span(),
+                    );
+                    self.types.unknown()
                 }
-            }
+            },
             ParserNodeKind::TypedIdentifier { .. } => self.types.none(),
             ParserNodeKind::VariableDeclaration { name, expr, ty } => {
                 let name = name.as_identifier();
@@ -251,7 +251,8 @@ impl<'a> Validator<'a> {
                     }
                 }
 
-                self.scope_stack.register_variable(name.to_string(), expr_type);
+                self.scope_stack
+                    .register_variable(name.to_string(), expr_type);
 
                 self.types.none()
             }
@@ -282,10 +283,8 @@ impl<'a> Validator<'a> {
                         }
                     }
                     None => {
-                        self.errors.add(
-                            ValidationErrorKind::NotAssignable,
-                            node.span(),
-                        );
+                        self.errors
+                            .add(ValidationErrorKind::NotAssignable, node.span());
                     }
                 }
 
@@ -443,7 +442,7 @@ impl<'a> Validator<'a> {
                                 node.span(),
                             );
                         }
-                        
+
                         self.types.bool()
                     }
                     _ => {
@@ -457,7 +456,7 @@ impl<'a> Validator<'a> {
                                 node.span(),
                             );
                         }
-        
+
                         if lhs_type != self.types.int() {
                             self.errors.add(
                                 ValidationErrorKind::ArithmeticUnsupported {
@@ -466,14 +465,14 @@ impl<'a> Validator<'a> {
                                 lhs.span(),
                             )
                         }
-        
+
                         if rhs_type != self.types.int() {
                             self.errors.add(
                                 ValidationErrorKind::ArithmeticUnsupported { ty: rhs_type },
                                 rhs.span(),
                             );
                         }
-        
+
                         lhs_type
                     }
                 }
@@ -510,10 +509,8 @@ impl<'a> Validator<'a> {
                         }
                     }
                     None => {
-                        self.errors.add(
-                            ValidationErrorKind::NotAssignable,
-                            node.span(),
-                        );
+                        self.errors
+                            .add(ValidationErrorKind::NotAssignable, node.span());
                     }
                 }
 
@@ -522,7 +519,7 @@ impl<'a> Validator<'a> {
             }
             ParserNodeKind::MemberAccess { expr, member } => {
                 self.visit_node(expr);
-                
+
                 match self.resolver().resolve(node) {
                     Ok(resolution) => match resolution.last() {
                         ResolvedPart::Field(ty, name) => ty
@@ -544,7 +541,7 @@ impl<'a> Validator<'a> {
                     Err(err) => {
                         self.errors
                             .add(ValidationErrorKind::CouldNotResolve(err), node.span());
-                        
+
                         return self.types.unknown();
                     }
                 }
@@ -615,7 +612,7 @@ impl<'a> Validator<'a> {
             .collect::<Vec<(&String, &[ParserNode])>>();
 
         // first pass to register empty struct definitions
-        for ((name, members), node) in struct_defs.iter().zip(nodes) {
+        for ((name, ..), node) in struct_defs.iter().zip(nodes) {
             if self.types.has_type(name) {
                 self.errors.add(
                     ValidationErrorKind::StructAlreadyDefined(name.to_string()),
@@ -663,11 +660,7 @@ impl<'a> Validator<'a> {
                         }
                     }
                     ParserNodeKind::FunctionDeclaration {
-                        name,
-                        args,
-                        return_ty,
-                        body,
-                        is_static
+                        name, is_static, ..
                     } => {
                         let owner = match is_static {
                             true => None,
@@ -694,7 +687,7 @@ impl<'a> Validator<'a> {
         }
 
         // third pass to check for self-referencing structs
-        for ((name, fields), nodes) in struct_defs.into_iter().zip(nodes) {
+        for ((name, ..), nodes) in struct_defs.into_iter().zip(nodes) {
             let struct_type = self.types.get_type_key(name).unwrap();
             let struct_def = struct_type.from(&self.types).as_struct_def();
 
@@ -722,12 +715,7 @@ impl<'a> Validator<'a> {
 
         for node in func_defs {
             match node.kind() {
-                ParserNodeKind::FunctionDeclaration {
-                    name,
-                    args,
-                    return_ty: return_ty_str,
-                    ..
-                } => {
+                ParserNodeKind::FunctionDeclaration { name, .. } => {
                     let func_signature = self.create_func_def(None, node);
 
                     if self
@@ -772,7 +760,7 @@ impl<'a> Validator<'a> {
         let mut arg_types = Vec::new();
 
         for arg in args {
-            let (arg_name, arg_type_str) = arg.as_typed_identifier();
+            let (_, arg_type_str) = arg.as_typed_identifier();
             let arg_type = self.types.get_type_key(arg_type_str);
 
             match arg_type {
@@ -904,12 +892,8 @@ pub struct ScopeStack {
 }
 
 impl ScopeStack {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self { scopes: Vec::new() }
-    }
-
-    pub fn empty() -> Self {
-        Self::new()
     }
 
     fn push(&mut self) {

@@ -1,4 +1,4 @@
-use std::{cell::Ref, fmt::Display, ops::Index};
+use std::{fmt::Display, ops::Index};
 
 use indexmap::IndexMap;
 
@@ -50,7 +50,14 @@ impl SculkType {
         match self {
             SculkType::Integer | SculkType::Bool => 1,
             SculkType::Struct(def) => match def.field_offsets.last() {
-                Some(last) => last + def.fields.index(def.fields.len() - 1).ty.from(types).total_size(types),
+                Some(last) => {
+                    last + def
+                        .fields
+                        .index(def.fields.len() - 1)
+                        .ty
+                        .from(types)
+                        .total_size(types)
+                }
                 None => 0,
             },
             _ => unreachable!(),

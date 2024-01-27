@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, ops::Range, process::Output};
+use std::{fmt::Display, ops::Range};
 
 use crate::lexer::{Token, TokenStream};
 
@@ -141,31 +141,19 @@ impl ParserNodeKind {
 
 impl ParserNode {
     pub fn is_num(&self) -> bool {
-        match self.kind {
-            ParserNodeKind::NumberLiteral(_) => true,
-            _ => false,
-        }
+        matches!(self.kind, ParserNodeKind::NumberLiteral { .. })
     }
 
     pub fn is_call(&self) -> bool {
-        match self.kind {
-            ParserNodeKind::FunctionCall { .. } => true,
-            _ => false,
-        }
+        matches!(self.kind, ParserNodeKind::FunctionCall { .. })
     }
 
     pub fn is_func_declaration(&self) -> bool {
-        match self.kind {
-            ParserNodeKind::FunctionDeclaration { .. } => true,
-            _ => false,
-        }
+        matches!(self.kind, ParserNodeKind::FunctionDeclaration { .. })
     }
 
     pub fn is_typed_identifier(&self) -> bool {
-        match self.kind {
-            ParserNodeKind::TypedIdentifier { .. } => true,
-            _ => false,
-        }
+        matches!(self.kind, ParserNodeKind::TypedIdentifier { .. })
     }
 
     fn as_num(&self) -> i32 {
@@ -252,7 +240,7 @@ impl<'a> Parser<'a> {
 
     fn call(
         &mut self,
-        mut parser: impl for<'b> FnOnce(&'b mut Parser<'a>) -> ParserKindResult,
+        parser: impl for<'b> FnOnce(&'b mut Parser<'a>) -> ParserKindResult,
     ) -> ParseResult {
         self.current_node_starts
             .push(self.tokens.peeked_span().start);
@@ -281,7 +269,7 @@ impl<'a> Parser<'a> {
                     Err(_) => continue, // error already logged, continue parsing
                 },
                 _ => {
-                    self.error_at("unexpected token or symbol", self.tokens.peeked_span());
+                    let _ = self.error_at("unexpected token or symbol", self.tokens.peeked_span());
                     continue;
                 }
             }
@@ -448,7 +436,7 @@ impl<'a> Parser<'a> {
             args,
             return_ty,
             body: Box::new(body),
-            is_static
+            is_static,
         })
     }
 
@@ -856,9 +844,13 @@ impl<'a> Parser<'a> {
 
         while self.tokens.peek() != Some(&Token::RightBrace) {
             let member = match self.tokens.peek() {
-                Some(Token::Identifier(_)) => self.call(|parser| parser.parse_typed_identifier(false))?,
-                Some(Token::Static) | Some(Token::Fn) => self.call(|parser| parser.parse_func_declaration())?,
-                _ => return self.error("expected field, function declaration, or }")
+                Some(Token::Identifier(_)) => {
+                    self.call(|parser| parser.parse_typed_identifier(false))?
+                }
+                Some(Token::Static) | Some(Token::Fn) => {
+                    self.call(|parser| parser.parse_func_declaration())?
+                }
+                _ => return self.error("expected field, function declaration, or }"),
             };
 
             members.push(member);

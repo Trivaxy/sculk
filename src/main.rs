@@ -1,20 +1,13 @@
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
+use backend::ir::{IrCompiler, IrFunction};
 use backend::{
-    codegen::CompiledFunction,
-    dpc_backend::DPCBackend,
-    function::FunctionSignature,
-    ir::{IrCompiler, IrFunction},
-    type_pool::TypePool,
-    types::SculkType,
-    validate::{Validator, ValidatorOutput},
+    dpc_backend::DPCBackend, function::FunctionSignature, type_pool::TypePool, validate::Validator,
     Backend, DefaultBackend,
 };
 use data::ResourceLocation;
 use error::CompileError;
 use parser::Parser;
-
-use crate::backend::codegen::CodeGen;
 
 mod backend;
 mod data;
@@ -121,7 +114,7 @@ fn compile_file(config: &Config, path: &str) -> (Option<Info>, Result<(), Vec<Co
 
     ir_compiler.visit_program(parser_output.ast.as_program());
 
-    let (signatures, types, tags, funcs) = ir_compiler.dissolve();
+    let (signatures, types, _, funcs) = ir_compiler.dissolve();
 
     if config.dump_ir {
         dump_ir(&config, &types, &signatures, &funcs);
@@ -145,6 +138,7 @@ fn dump_ir(
     signatures: &HashMap<ResourceLocation, FunctionSignature>,
     funcs: &[IrFunction],
 ) {
+    let (_, _, _) = (config, types, signatures);
     let mut s = String::new();
 
     for func in funcs {

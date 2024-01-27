@@ -1,17 +1,13 @@
-use std::{collections::HashMap, io};
+use std::collections::HashMap;
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 
-use crate::{
-    backend::{resolve::ResolvedPart,
-        function::FunctionSignature,
-        resolve::{Resolution, ResolutionError},
-        type_pool::TypePool,
-        validate::{ValidationError, ValidationErrorKind},
-    },
-    data::ResourceLocation,
-    parser::ParseError,
+use crate::backend::validate::{ValidationError, ValidationErrorKind};
+use crate::backend::{
+    function::FunctionSignature, resolve::ResolutionError, resolve::ResolvedPart,
+    type_pool::TypePool,
 };
+use crate::{data::ResourceLocation, parser::ParseError};
 
 pub enum CompileError {
     Parse(ParseError),
@@ -37,6 +33,7 @@ pub fn print_report(
     types: &TypePool,
     signatures: &HashMap<ResourceLocation, FunctionSignature>,
 ) {
+    let _ = signatures;
     let offset = match error {
         CompileError::Parse(error) => error.span.end,
         CompileError::Validate(error) => error.span.end,
@@ -120,7 +117,7 @@ pub fn print_report(
                             .with_color(Color::Red)
                             .with_message(format!("... but this expression is of type '{}'", actual.from(types).fg(Color::Cyan))))
                 }
-                ValidationErrorKind::NotEnoughArguments { missing, callee_span } => {
+                ValidationErrorKind::NotEnoughArguments { missing, .. } => {
                     report
                         .with_message(format!("not enough arguments"))
                         .with_label(Label::new((file_name, error.span.clone()))
@@ -132,7 +129,7 @@ pub fn print_report(
                         .with_message(format!("cannot apply operator {} to operands of type '{}' and '{}'", op.fg(Color::Yellow), lhs.from(types).fg(Color::Cyan), rhs.from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
-                ValidationErrorKind::ComparisonOperatorTypeMismatch { lhs, rhs, op } => {
+                ValidationErrorKind::ComparisonOperatorTypeMismatch { op, .. } => {
                     report
                         .with_message(format!("comparison operators such as {} can only be applied to numeric operands of the same type", op.fg(Color::Yellow)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
@@ -181,7 +178,7 @@ pub fn print_report(
                         .with_message("unknown type")
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
-                ValidationErrorKind::LogicalOperatorTypeMismatch { lhs, rhs, op } => {
+                ValidationErrorKind::LogicalOperatorTypeMismatch { op, .. } => {
                     report
                         .with_message(format!("logical operators such as {} can only be applied to operands of type '{}'", op.fg(Color::Yellow), types.bool().from(types).fg(Color::Cyan)))
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
@@ -193,12 +190,12 @@ pub fn print_report(
                             .with_label(Label::new((file_name, error.span.clone()))
                                 .with_color(Color::Red)
                                 .with_message(format!("candidates: {}", candidates.iter().map(|c| match c {
-                                    ResolvedPart::Variable(ty, name) => format!("- variable '{}'", name.fg(Color::Green)),
+                                    ResolvedPart::Variable(_, name) => format!("- variable '{}'", name.fg(Color::Green)),
                                     ResolvedPart::GlobalFunction(name) => format!("global function '{}'", name.fg(Color::Green)),
-                                    ResolvedPart::Type(ty) => format!("- type '{}'", name.fg(Color::Green)),
+                                    ResolvedPart::Type(..) => format!("- type '{}'", name.fg(Color::Green)),
                                     ResolvedPart::Field(ty, name) => format!("- field '{}' of type '{}'", name.fg(Color::Green), ty.from(&types).as_struct_def().name().fg(Color::Cyan)),
                                     ResolvedPart::Method(ty, name) => format!("- method '{}' of type '{}'", name.fg(Color::Green), ty.from(&types).as_struct_def().name().fg(Color::Cyan)),
-                                    ResolvedPart::Constructor(ty) => format!("- constructor of type '{}'", name.fg(Color::Cyan)),
+                                    ResolvedPart::Constructor(..) => format!("- constructor of type '{}'", name.fg(Color::Cyan)),
                                 }).collect::<Vec<String>>().join("\n"))))
                     }
                     ResolutionError::UnresolvedIdentifier(name) => {
@@ -256,7 +253,7 @@ pub fn print_report(
         }
     }
 
-    report
+    let _ = report
         .finish()
         .print((file_name, Source::from(file_content)));
 }

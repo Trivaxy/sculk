@@ -8,10 +8,7 @@ pub struct ResourceLocation {
 
 impl ResourceLocation {
     pub fn new(namespace: String, path: String) -> Self {
-        Self {
-            namespace,
-            path,
-        }
+        Self { namespace, path }
     }
 }
 
@@ -23,12 +20,6 @@ impl Display for ResourceLocation {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Objective(pub String);
-
-impl Objective {
-    pub fn new(name: String) -> Self {
-        Self(name)
-    }
-}
 
 impl Display for Objective {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

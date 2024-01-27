@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::collections::HashMap;
 
 use crate::backend::types::SculkType;
 
@@ -33,7 +33,7 @@ impl TypePool {
         type_pool
     }
 
-    pub fn insert(&mut self, name: String, mut ty: SculkType) {
+    pub fn insert(&mut self, name: String, ty: SculkType) {
         let idx_in_pool = self.types.len();
         self.types.push(ty);
         self.type_map.insert(name, idx_in_pool);

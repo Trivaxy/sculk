@@ -21,6 +21,7 @@ pub struct DefaultBackend;
 
 impl Backend for DefaultBackend {
     fn compile(config: &Config, ir: &[IrFunction], types: &TypePool) {
+        let _ = types;
         let mut codegen = CodeGen::new(config.pack.clone());
         codegen.compile_ir_functions(ir);
 
