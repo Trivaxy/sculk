@@ -85,6 +85,7 @@ fn dpc_codegen(
             preserve: true,
             no_inline: false,
             no_strip: false,
+            unused_result: true,
         };
         let interface = FunctionInterface::with_all(
             function_id.clone().into(),
