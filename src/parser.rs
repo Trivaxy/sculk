@@ -423,8 +423,6 @@ impl<'a> Parser<'a> {
                     events.push(event);
                 }
                 _ => {
-                    // TODO: Peek expect a fn or static
-                    // expect_toks!(self, "expected fn or static", Token::Fn, Token::Static);
                     break;
                 }
             }
@@ -495,10 +493,10 @@ impl<'a> Parser<'a> {
 
         let expr = match self.tokens.peek() {
             Some(Token::Semicolon) => None,
-            _ => Some(self.call(Self::parse_expression)?),
+            _ => Some(Box::new(self.call(Self::parse_expression)?)),
         };
 
-        Ok(ParserNodeKind::Return(expr.map(|expr| Box::new(expr))))
+        Ok(ParserNodeKind::Return(expr))
     }
 
     fn parse_break_statement(&mut self) -> ParserKindResult {
