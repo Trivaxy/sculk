@@ -72,6 +72,7 @@ impl<'a> Validator<'a> {
                 name,
                 body,
                 is_static,
+                events,
                 ..
             } => {
                 if *is_static && self.current_struct.is_none() {
@@ -96,6 +97,18 @@ impl<'a> Validator<'a> {
                         .add(ValidationErrorKind::NotAllPathsReturn, node.span());
                 }
 
+                if !events.is_empty() {
+                    if !*is_static && self.current_struct.is_some() {
+                        self.errors
+                            .add(ValidationErrorKind::EventListenerNotAllowed, node.span());
+                    }
+
+                    if !func_signature.params().is_empty() {
+                        self.errors
+                            .add(ValidationErrorKind::InvalidEventListenerArgs, node.span());
+                    }
+                }
+
                 self.scope_stack.push();
 
                 if !is_static && self.current_struct.is_some() {
@@ -109,6 +122,10 @@ impl<'a> Validator<'a> {
                 });
 
                 self.visit_node(body);
+
+                for event in events {
+                    self.visit_node(event);
+                }
 
                 self.current_return_type = None;
                 self.scope_stack.pop();
@@ -558,6 +575,15 @@ impl<'a> Validator<'a> {
                 self.current_struct = None;
                 self.types.none()
             }
+            ParserNodeKind::EventListener { name } => {
+                match name.as_str() {
+                    "on_tick" | "on_load" => {}
+                    _ => self
+                        .errors
+                        .add(ValidationErrorKind::InvalidEventListener, node.span()),
+                }
+                self.types.none()
+            }
         };
 
         if ty != self.types.none() && ty != self.types.unknown() {
@@ -885,6 +911,9 @@ pub enum ValidationErrorKind {
     CannotReferenceMethodAsValue,
     NotAssignable,
     StaticNotAllowed,
+    EventListenerNotAllowed,
+    InvalidEventListener,
+    InvalidEventListenerArgs,
 }
 
 pub struct ScopeStack {

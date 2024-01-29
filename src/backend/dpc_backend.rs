@@ -18,15 +18,22 @@ use crate::Config;
 
 use itertools::Itertools;
 
-use super::ir::{BinaryOperation, Instruction, IrFunction, ValueLocation};
+use super::ir::{BinaryOperation, Instruction, Ir, IrFunction, ValueLocation};
 use super::type_pool::TypePool;
 use super::Backend;
 
 pub struct DPCBackend;
 
 impl Backend for DPCBackend {
-    fn compile(config: &Config, ir: &[IrFunction], types: &TypePool) {
-        let datapack = dpc_codegen(ir, config, types).expect("Failed to do DPC codegen");
+    fn compile(config: &Config, ir: &Ir, types: &TypePool) {
+        let mut datapack =
+            dpc_codegen(&ir.functions, config, types).expect("Failed to do DPC codegen");
+        datapack.function_tags.extend(
+            ir.function_tags
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k.to_string().into(), v)),
+        );
         datapack
             .output(&PathBuf::from(format!("./{}", config.pack)))
             .expect("Failed to output pack");

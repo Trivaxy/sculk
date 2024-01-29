@@ -114,15 +114,15 @@ fn compile_file(config: &Config, path: &str) -> (Option<Info>, Result<(), Vec<Co
 
     ir_compiler.visit_program(parser_output.ast.as_program());
 
-    let (signatures, types, _, funcs) = ir_compiler.dissolve();
+    let (signatures, types, _, ir) = ir_compiler.dissolve();
 
     if config.dump_ir {
-        dump_ir(&config, &types, &signatures, &funcs);
+        dump_ir(&config, &types, &signatures, &ir.functions);
     }
 
     match config.backend.as_str() {
-        "default" => DefaultBackend::compile(config, &funcs, &types),
-        "dpc" => DPCBackend::compile(config, &funcs, &types),
+        "default" => DefaultBackend::compile(config, &ir, &types),
+        "dpc" => DPCBackend::compile(config, &ir, &types),
         _ => {
             println!("unknown backend: {}", config.backend);
             return (None, Err(Vec::new()));

@@ -131,6 +131,9 @@ pub enum Token<'a> {
     #[token("->")]
     Arrow,
 
+    #[token("@")]
+    At,
+
     #[regex(r"[a-zA-Z_]+[a-zA-Z0-9_]*", |tok| tok.slice())]
     Identifier(&'a str),
 

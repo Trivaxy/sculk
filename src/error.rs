@@ -249,6 +249,21 @@ pub fn print_report(
                         .with_message("static functions can only exist inside struct definitions")
                         .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
                 }
+                ValidationErrorKind::EventListenerNotAllowed => {
+                    report
+                        .with_message("event listeners cannot be attached to non-static struct functions")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::InvalidEventListener => {
+                    report
+                        .with_message("invalid event listener ID")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
+                ValidationErrorKind::InvalidEventListenerArgs => {
+                    report
+                        .with_message("arguments invalid for event listener")
+                        .with_label(Label::new((file_name, error.span.clone())).with_color(Color::Red))
+                }
             }
         }
     }

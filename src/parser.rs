@@ -91,6 +91,7 @@ pub enum ParserNodeKind {
         return_ty: Option<String>,
         body: Box<ParserNode>,
         is_static: bool,
+        events: Vec<ParserNode>,
     },
     Return(Option<Box<ParserNode>>),
     FunctionCall {
@@ -126,6 +127,9 @@ pub enum ParserNodeKind {
         member: Box<ParserNode>,
     },
     Break,
+    EventListener {
+        name: String,
+    },
     CommandLiteral(String),
 }
 
@@ -212,6 +216,25 @@ impl ParserNode {
             _ => panic!("tried to get function body from non-function node"),
         }
     }
+
+    pub fn as_event_listener(&self) -> &str {
+        match &self.kind {
+            ParserNodeKind::EventListener { name, .. } => name,
+            _ => panic!("tried to get event listeners from non-event node"),
+        }
+    }
+}
+
+// Expects any one of multiple tokens
+macro_rules! expect_toks {
+    ($parser:expr, $err:expr, $($token:pat),+) => {
+        match $parser.tokens.peek() {
+            $(
+                Some($token) => $parser.tokens.next(),
+            )+
+            _ => return $parser.error_at($err, $parser.tokens.peeked_span()),
+        };
+    };
 }
 
 macro_rules! expect_tok {
@@ -260,10 +283,12 @@ impl<'a> Parser<'a> {
 
         while self.tokens.peek().is_some() {
             match self.tokens.peek().unwrap() {
-                Token::Fn | Token::Static => match self.call(Self::parse_func_declaration) {
-                    Ok(stmt) => nodes.push(stmt),
-                    Err(_) => continue, // error already logged, continue parsing
-                },
+                Token::Fn | Token::Static | Token::At => {
+                    match self.call(Self::parse_func_declaration) {
+                        Ok(stmt) => nodes.push(stmt),
+                        Err(_) => continue, // error already logged, continue parsing
+                    }
+                }
                 Token::Struct => match self.call(Self::parse_struct_definition) {
                     Ok(stmt) => nodes.push(stmt),
                     Err(_) => continue, // error already logged, continue parsing
@@ -389,6 +414,22 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_func_declaration(&mut self) -> ParserKindResult {
+        // Collect event listeners
+        let mut events = Vec::new();
+        loop {
+            match self.tokens.peek() {
+                Some(Token::At) => {
+                    let event = self.call(Self::parse_event_listener)?;
+                    events.push(event);
+                }
+                _ => {
+                    // TODO: Peek expect a fn or static
+                    // expect_toks!(self, "expected fn or static", Token::Fn, Token::Static);
+                    break;
+                }
+            }
+        }
+
         let is_static = match self.tokens.peek() {
             Some(Token::Static) => {
                 self.tokens.next(); // consume the static
@@ -437,6 +478,15 @@ impl<'a> Parser<'a> {
             return_ty,
             body: Box::new(body),
             is_static,
+            events,
+        })
+    }
+
+    fn parse_event_listener(&mut self) -> ParserKindResult {
+        expect_tok!(self, Token::At, "expected @");
+        let event = self.call(Self::parse_identifier)?;
+        Ok(ParserNodeKind::EventListener {
+            name: event.as_identifier().into(),
         })
     }
 

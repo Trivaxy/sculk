@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::Config;
 
-use self::{codegen::CodeGen, ir::IrFunction, type_pool::TypePool};
+use self::{codegen::CodeGen, ir::Ir, type_pool::TypePool};
 
 pub mod codegen;
 pub mod dpc_backend;
@@ -14,16 +14,16 @@ pub mod types;
 pub mod validate;
 
 pub trait Backend {
-    fn compile(config: &Config, ir: &[IrFunction], types: &TypePool);
+    fn compile(config: &Config, ir: &Ir, types: &TypePool);
 }
 
 pub struct DefaultBackend;
 
 impl Backend for DefaultBackend {
-    fn compile(config: &Config, ir: &[IrFunction], types: &TypePool) {
+    fn compile(config: &Config, ir: &Ir, types: &TypePool) {
         let _ = types;
         let mut codegen = CodeGen::new(config.pack.clone());
-        codegen.compile_ir_functions(ir);
+        codegen.compile_ir_functions(&ir.functions);
 
         let compiled_funcs = codegen.dissolve();
 

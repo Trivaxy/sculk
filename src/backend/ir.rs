@@ -4,6 +4,8 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use dpc::output::datapack::Tag;
+
 use crate::{
     data::{Objective, ResourceLocation, ScoreboardSlot},
     parser::{Operation, ParserNode, ParserNodeKind},
@@ -15,6 +17,11 @@ use super::{
     type_pool::TypePool,
     validate::TagPool,
 };
+
+pub struct Ir {
+    pub functions: Vec<IrFunction>,
+    pub function_tags: HashMap<ResourceLocation, Tag>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ValueLocation {
@@ -288,6 +295,8 @@ pub struct IrCompiler<'a> {
     global_functions: HashMap<ResourceLocation, FunctionSignature>,
     tags: TagPool<'a>,
     compiled_funcs: Vec<IrFunction>,
+    on_tick: Vec<ResourceLocation>,
+    on_load: Vec<ResourceLocation>,
 }
 
 impl<'a> IrCompiler<'a> {
@@ -303,6 +312,8 @@ impl<'a> IrCompiler<'a> {
             global_functions,
             tags,
             compiled_funcs: Vec::new(),
+            on_tick: Vec::new(),
+            on_load: Vec::new(),
         }
     }
 
@@ -312,13 +323,35 @@ impl<'a> IrCompiler<'a> {
         HashMap<ResourceLocation, FunctionSignature>,
         TypePool,
         TagPool<'a>,
-        Vec<IrFunction>,
+        Ir,
     ) {
+        let mut tags = HashMap::new();
+        if !self.on_tick.is_empty() {
+            let mut tag = Tag::new();
+            tag.inner.values = self.on_tick.into_iter().map(|x| x.to_string()).collect();
+            tags.insert(
+                ResourceLocation::new("minecraft".into(), "tick".into()),
+                tag,
+            );
+        }
+
+        if !self.on_load.is_empty() {
+            let mut tag = Tag::new();
+            tag.inner.values = self.on_load.into_iter().map(|x| x.to_string()).collect();
+            tags.insert(
+                ResourceLocation::new("minecraft".into(), "load".into()),
+                tag,
+            );
+        }
+
         (
             self.global_functions,
             self.types,
             self.tags,
-            self.compiled_funcs,
+            Ir {
+                functions: self.compiled_funcs,
+                function_tags: tags,
+            },
         )
     }
 
@@ -327,11 +360,13 @@ impl<'a> IrCompiler<'a> {
     pub fn visit_program(&mut self, program: &'a [ParserNode]) {
         for node in program {
             match node.kind() {
-                ParserNodeKind::FunctionDeclaration { name, body, .. } => {
+                ParserNodeKind::FunctionDeclaration {
+                    name, body, events, ..
+                } => {
+                    // Build the function
+                    let resource_loc = ResourceLocation::new(self.pack_name.clone(), name.clone());
                     let mut builder = IrFunctionBuilder::new(
-                        self.global_functions
-                            .get(&ResourceLocation::new(self.pack_name.clone(), name.clone()))
-                            .unwrap(),
+                        self.global_functions.get(&resource_loc).unwrap(),
                         Objective(name.clone()),
                         self.pack_name.clone(),
                         &self.global_functions,
@@ -341,7 +376,24 @@ impl<'a> IrCompiler<'a> {
 
                     builder.visit_node(body);
 
-                    self.compiled_funcs.push(builder.finish());
+                    let mut func = builder.finish();
+
+                    // Attach any events
+                    for event in events {
+                        func.preserve = true;
+                        let event = event.as_event_listener();
+                        match event {
+                            "on_tick" => {
+                                self.on_tick.push(resource_loc.clone());
+                            }
+                            "on_load" => {
+                                self.on_load.push(resource_loc.clone());
+                            }
+                            other => panic!("Invalid event {other}"),
+                        }
+                    }
+
+                    self.compiled_funcs.push(func);
                 }
                 ParserNodeKind::StructDefinition { name, members } => {
                     for method in members.iter().filter(|m| m.is_func_declaration()) {
@@ -377,6 +429,7 @@ pub struct IrFunction {
     objective: Objective,
     body: Vec<Instruction>,
     signature: FunctionSignature,
+    preserve: bool,
 }
 
 impl IrFunction {
@@ -385,6 +438,7 @@ impl IrFunction {
             objective,
             body,
             signature,
+            preserve: false,
         }
     }
 
@@ -580,6 +634,7 @@ impl<'a> IrFunctionBuilder<'a> {
             ParserNodeKind::TypedIdentifier { .. } => ValueLocation::dummy(),
             ParserNodeKind::FunctionDeclaration { .. } => ValueLocation::dummy(),
             ParserNodeKind::StructDefinition { .. } => ValueLocation::dummy(),
+            ParserNodeKind::EventListener { .. } => ValueLocation::dummy(),
         }
     }
 

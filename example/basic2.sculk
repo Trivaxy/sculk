@@ -6,6 +6,7 @@ fn add2(a: int, b: int) -> int {
 	return a + b;
 }
 
+@on_load
 fn main() {
 	let x = 7;
 	let y = 9;
@@ -15,6 +16,11 @@ fn main() {
 	let vec = Vector3(1, 2, 3);
 	let vec2 = Vector3.single(10);
 	add(vec2.x, vec2.y, vec2.z);
+}
+
+@on_tick
+fn on_tick() {
+	/say hello;
 }
 
 struct Vector3 {
