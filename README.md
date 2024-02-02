@@ -40,7 +40,7 @@ If you want to know what Sculk will look like and how to use it, read the [wiki]
 - [x] Inline Command Literals
 - [x] Loops
 - [ ] Recursion
-- [ ] Fixed floating point numbers
+- [ ] Fixed point numbers
 - [ ] Arrays/Lists
 - [ ] Structs
 - [ ] Strings
